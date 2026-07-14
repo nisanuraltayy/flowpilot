@@ -23,8 +23,9 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 | Environment preflight | ✅ Tamamlandı |
 | Repository foundation bootstrap | ✅ Tamamlandı |
 | Python fiziksel yerleşimi (ADR-009) | ✅ Tamamlandı |
-| **Backend scaffold + quality tooling** | ✅ **Bu aşama** |
-| Local altyapı (PostgreSQL + MinIO) | ⏳ Sıradaki |
+| Backend scaffold + quality tooling | ✅ Tamamlandı |
+| **Local altyapı (PostgreSQL + MinIO)** | ✅ **Bu aşama** |
+| PostgreSQL database foundation / Alembic | ⏳ Sıradaki |
 | Frontend scaffold | ⛔ Henüz başlamadı |
 | İlk dikey dilim (satın alma) | ⛔ Henüz başlamadı |
 
@@ -175,6 +176,15 @@ Kalite kapıları:
 ```
 
 Ayrıntı: [apps/backend/README.md](apps/backend/README.md). `.venv` Git'e **eklenmez**. `.env.example` gerçek secret **içermez**.
+
+### Local altyapı (PostgreSQL + MinIO)
+
+```powershell
+Copy-Item .env.example .env    # .env içinde local parolaları girin (git-ignored)
+docker compose --env-file .env -f infra/containers/compose.yaml up -d
+```
+
+PostgreSQL `localhost:5432`, MinIO API `localhost:9000`, MinIO Console `localhost:9001`. Uygulama henüz bunlara **bağlanmaz**; schema/tablo/migration/bucket **yoktur**. Ayrıntı ve tüm komutlar: [infra/containers/README.md](infra/containers/README.md).
 
 ---
 

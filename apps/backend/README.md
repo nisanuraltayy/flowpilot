@@ -21,6 +21,16 @@ python -m venv .venv
 
 Editable install (`-e`) sayesinde `flowpilot` paketi doğrudan `apps/backend/src`'ten çözülür. **`PYTHONPATH` hack'i kullanılmaz** (ADR-009).
 
+### Local altyapı
+
+Integration testleri (henüz yok) gerçek PostgreSQL ve MinIO gerektirecek. Local servisler ayrı bir Compose projesiyle çalışır — uygulama **henüz bağlanmaz**:
+
+```powershell
+docker compose --env-file .env -f infra/containers/compose.yaml up -d
+```
+
+PostgreSQL `localhost:5432`, MinIO `localhost:9000` (API) / `localhost:9001` (console). Ayrıntı: [infra/containers/README.md](../../infra/containers/README.md).
+
 ## Komutlar
 
 ```powershell

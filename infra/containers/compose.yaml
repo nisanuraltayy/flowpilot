@@ -1,0 +1,76 @@
+# FlowPilot — LOCAL DEVELOPMENT ALTYAPISI
+#
+# ⚠️ YALNIZCA LOCAL DEVELOPMENT VE INTEGRATION TESTİ İÇİNDİR.
+#    Production deployment için kullanılmaz.
+#
+# Servisler: PostgreSQL (tek source of truth) + MinIO (S3-compatible storage).
+#
+# Kurallar:
+#   - Secret DEĞERLERİ BU DOSYADA HARD-CODE EDİLMEZ. Tümü environment'tan gelir;
+#     eksikse Compose `${VAR:?...}` ile ANLAŞILIR HATA üretir ve başlamaz.
+#   - `latest` tag YASAK — imajlar pinlenmiştir.
+#   - Veriler NAMED VOLUME'da tutulur; repository içine bind mount EDİLMEZ.
+#   - privileged, host network, Docker socket mount YOKTUR.
+#   - Ek capability verilmez; `no-new-privileges` açıktır.
+#
+# Bu aşamada YOK: schema, tablo, extension, RLS policy, application role,
+# init SQL script, bucket, access policy.
+#
+# Kullanım: bkz. README.md
+
+name: flowpilot
+
+services:
+  postgres:
+    # PostgreSQL 17 (pinned). Gerekçe: ADR-006 (RLS) ve ADR-007 (FOR UPDATE
+    # SKIP LOCKED) PostgreSQL'e özgü davranışlara dayanır; 17 bu yeteneklerin
+    # olgun ve geniş şekilde desteklendiği kararlı major sürümdür.
+    image: postgres:17.10-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB tanimli degil — repo kokunde .env olusturun (.env.example ornek alin)}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER tanimli degil — repo kokunde .env olusturun}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD tanimli degil — repo kokunde .env olusturun}
+      # Alpine imajinda locale/collation kararliligi icin:
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      # host:container — host portu degistirilebilir, container portu sabittir.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  minio:
+    # MinIO (pinned). `latest` kullanilmaz.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER tanimli degil — repo kokunde .env olusturun}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD tanimli degil — repo kokunde .env olusturun}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"      # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"  # Web console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres-data:
+    name: flowpilot-postgres-data
+  minio-data:
+    name: flowpilot-minio-data
