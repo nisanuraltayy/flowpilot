@@ -1,0 +1,320 @@
+# FlowPilot — Epic Backlog
+#
+# Kapsam: YALNIZCA ilk dikey dilim (satın alma talebi) ve onu mümkün kılan temel yetenekler.
+#
+# BAĞLAYICI KAPSAM KAYNAĞI: docs/product/mvp-scope-v0.1.md (owner-approved).
+# Bu doküman PRD §7.1 ve §24'teki geniş MVP tanımının ÜZERİNDE önceliğe sahiptir.
+# PRD DEĞİŞTİRİLMEZ; araştırma ve uzun vadeli vizyon olarak korunur.
+# PRD'nin MÜHENDİSLİK kuralları (invariant, anti-pattern, state machine, güvenlik) tam bağlayıcıdır.
+#
+# Bağlayıcı kaynaklar: docs/product/mvp-scope-v0.1.md, docs/adr/*, docs/FlowPilot_Teknik_PRD_v0.2_Agent_Ready.md
+# Story'ler: docs/backlog/vertical-slice-purchase-request.yaml
+
+meta:
+  version: "0.2"
+  created_at: "2026-07-14"
+  updated_at: "2026-07-14"    # owner kararları işlendi
+  owner: "Nisa Nur Altay"
+  slice: "purchase-request-vertical-slice"
+  status: approved            # owner tarafından onaylandı; bootstrap komutu bekleniyor
+  independent_of: "Career Copilot"
+  scope_source: docs/product/mvp-scope-v0.1.md
+
+  mvp_node_set:
+    - Start
+    - Form
+    - Condition
+    - Sequential Approval
+    - Notification
+    - End
+
+  # Local MVP dışı, ancak PILOT-READY zorunlu. Portu ŞİMDİDEN tasarlanır; adapter sonra eklenir.
+  pilot_ready_scope:
+    - id: email_notification
+      port: NotificationChannelPort
+      mvp_adapter: in_app_only
+      rule: "Kanal-nötr port MVP'de tasarlanır. E-posta eklemek bir ADAPTER işidir, refactor DEĞİL."
+      reference: ASM-0010
+    - id: malware_scanning
+      port: MalwareScanPort
+      mvp_adapter: no_op_stub
+      rule: >
+        Port ve scan_status kapısı MVP'de hazırdır; gerçek tarama entegrasyonu YAPILMAZ.
+        Pilot-ready sürümün ZORUNLU güvenlik çıkış kriteridir. Local MVP pilot müşteriye AÇILMAZ.
+      reference: ASM-0007
+
+  explicitly_out_of_scope:
+    - parallel_split_join
+    - quorum_approval
+    - sub_workflow
+    - webhook_node
+    - script_node
+    - ai_node
+    - dmn
+    - visual_workflow_canvas
+    - wait_timer_node          # persisted timer altyapısı spike'ta kanıtlanır; NODE olarak sunulmaz
+    - sla_escalation_chain
+    - delegation
+    - billing_entitlements
+    - advanced_analytics
+    - sso_scim_mfa
+
+  # Geçici ürün varsayımı — ASM-0001. Domain koduna HARD-CODE EDİLEMEZ.
+  purchase_approval_thresholds:
+    source: workflow_definition   # Condition node koşulları + Sequential Approval config
+    tiers:
+      - range: "< 10.000 TL"
+        chain: [team_manager]
+      - range: "10.000 – 50.000 TL"
+        chain: [team_manager, finance]
+      - range: "> 50.000 TL"
+        chain: [team_manager, finance, general_manager]
+    binding_rule: >
+      Sequential Approval node'u 1, 2 VEYA 3 adımlı zincirleri desteklemek zorundadır.
+      Kademe sayısı config'ten gelir. Eşiği değiştirmek = yeni workflow version yayınlamak.
+    reference: ASM-0001
+
+  complexity_scale: [XS, S, M, L]   # XL YASAK — XL story daha küçük story'lere bölünür
+  status_values: [draft, ready, blocked, in_progress, done]
+
+epics:
+
+  - id: E00
+    title: Repository Governance ve Karar Kayıtları
+    priority: P0
+    depends_on: []
+    goal: >
+      Agent'in çalışabileceği tek gerçek kaynak yapısını kurmak: talimat dosyaları,
+      ADR süreci, varsayım ve açık karar disiplini.
+    exit_criteria:
+      - Governance dosyaları (CLAUDE.md, AGENTS.md, .claude/rules/*) mevcut ve güncel
+      - Her ADR bir durum ve kapattığı kilit ile kayıtlı
+      - Varsayımlar ASM-xxxx, açık kararlar OQ-xxx kimlikleriyle izleniyor
+    open_locks: []
+    notes: >
+      Repository bootstrap (scaffold, dependency, CI) bu epic'te DEĞİLDİR ve owner onayına bağlıdır.
+
+  - id: E01
+    title: Authentication Boundary (Supabase Auth)
+    priority: P0
+    depends_on: [E00]
+    goal: >
+      Supabase Auth'u AuthProviderPort arkasında entegre etmek; kimlik doğrulamayı provider'a,
+      yetkilendirmeyi FlowPilot domain'ine bırakmak.
+    exit_criteria:
+      - Supabase adapter ve fake adapter AYNI contract test setini geçiyor
+      - Token doğrulaması (JWKS imza / issuer / audience / expiry) her istekte uygulanıyor
+      - Doğrulanmamış kullanıcı tenant verisine erişemiyor
+      - Domain katmanında Supabase SDK importu YOK (fitness check)
+    open_locks: []
+    decision: "ADR-005 — Supabase Auth (LOCK-004 KAPANDI, 2026-07-14)"
+    binding_rules:
+      - "Supabase YALNIZCA authentication sağlayıcısıdır."
+      - "Organization, membership, manager hierarchy, RBAC, authorization ve tenant modeli FlowPilot domain'inde ve FlowPilot'ın PostgreSQL'indedir."
+      - "Supabase'in organizations/roles özelliklerine bağımlılık kurulamaz."
+      - "Supabase'in veritabanı/RLS'i FlowPilot'ın operasyonel veritabanı olarak KULLANILAMAZ."
+      - "Domain katmanı Supabase SDK'sına doğrudan bağımlı olamaz; entegrasyon yalnız adapter'dadır."
+    notes: >
+      Gerçek Supabase entegrasyonu repository bootstrap onayı SONRASINDA yapılır.
+      Bu dokümantasyon aşamasında hiçbir entegrasyon kodu yazılmamıştır.
+
+  - id: E02
+    title: Tenant ve Organization
+    priority: P0
+    depends_on: [E01]
+    goal: Tenant sınırını, organizasyon aggregate'ini ve TenantContext çözümlemesini kurmak.
+    exit_criteria:
+      - Her tenant verisi tenant_id taşıyor
+      - TenantContext request/worker başında bir kez çözülüyor, istemci gövdesinden okunmuyor
+      - Tenant hiçbir anda owner'sız kalmıyor
+    open_locks: []
+
+  - id: E03
+    title: Membership ve RBAC
+    priority: P0
+    depends_on: [E02]
+    goal: >
+      Membership yaşam döngüsünü ve merkezi authorization policy boundary'sini kurmak.
+      Rol ve permission FlowPilot domain'indedir; provider'a bırakılmaz.
+    exit_criteria:
+      - Merkezi permission katalogu var; her protected endpoint policy adı belirtiyor
+      - Controller içinde dağınık rol kontrolü yok
+      - Her yetki reddi audit'e yazılıyor
+      - Negatif authorization test suite'i çalışıyor
+    open_locks: []
+
+  - id: E04
+    title: Tenant İzolasyonu (Defense-in-Depth)
+    priority: P0
+    depends_on: [E02, E03]
+    goal: >
+      Application-level tenant scope + PostgreSQL RLS ile iki bağımsız savunma katmanı kurmak
+      ve cross-tenant regression suite'i ile sürekli doğrulamak.
+    exit_criteria:
+      - Tenant tablolarının tamamında RLS politikası tanımlı ve testlerle kanıtlı
+      - Uygulama BYPASSRLS yetkili rolle bağlanmıyor
+      - Cross-tenant IDOR/BOLA suite'i tüm temel kaynaklarda otomatik çalışıyor
+      - Tenant filtresi geliştiricinin hatırlamasına bırakılmıyor
+    open_locks: []
+    notes: "En kritik risk. ADR-006."
+
+  - id: E05
+    title: Form Schema ve Server-Side Validation
+    priority: P0
+    depends_on: [E03]
+    goal: Versiyonlu form şeması, sunucu tarafı doğrulama ve immutable submission snapshot'ı.
+    exit_criteria:
+      - Form şeması JSON Schema ile doğrulanıyor ve workflow version'a bağlanabiliyor
+      - UI bypass edilse bile required/type/range kuralları sunucuda uygulanıyor
+      - Submission immutable snapshot olarak saklanıyor
+    open_locks: []
+
+  - id: E06
+    title: Purchase Request Submission
+    priority: P0
+    depends_on: [E05]
+    goal: >
+      Satın alma talebi domain'i: ürün/hizmet adı, kategori, tutar (minor unit + currency),
+      gerekçe ve isteğe bağlı dosya eki.
+    exit_criteria:
+      - Para float değil; minor unit + currency olarak saklanıyor
+      - Talep oluşturma idempotent
+      - Dosya eki S3-compatible storage portu üzerinden yükleniyor (presigned upload)
+      - MalwareScanPort tasarlandı; scan_status kapısı hazır (gerçek tarama MVP'de YOK — ASM-0007)
+    open_locks: []
+
+  - id: E07
+    title: Workflow Publish ve Versioning
+    priority: P0
+    depends_on: [E05]
+    goal: Draft aggregate, graph validation, publish ve IMMUTABLE workflow version.
+    exit_criteria:
+      - Published version immutable; hash'li; üzerine UPDATE çalıştıran kod yolu yok
+      - Publish işlemi yetki + audit gerektiriyor ve atomik
+      - MVP node seti dışında node tipi yayınlanamıyor
+    open_locks: []
+
+  - id: E08
+    title: Workflow Runtime Spike
+    priority: P0
+    depends_on: [E07]
+    goal: >
+      Custom PostgreSQL-backed runtime'ın 12 exit criterion'unu KANITLAMAK.
+      Başarısız olursa Temporal yeniden değerlendirilir.
+    exit_criteria:
+      - SPK-01..SPK-12 kriterlerinin TAMAMI kanıt paketiyle geçti (12/12)
+      - Spike raporu ve ADR-004 güncellemesi üretildi
+    open_locks: [LOCK-003]
+    notes: >
+      Bkz. docs/architecture/workflow-runtime-spike-plan.md.
+      Spike geçmeden runtime'a bağlı kalıcı üretim kodu YAZILAMAZ. Kısmi başarı = başarısızlık.
+
+  - id: E09
+    title: Workflow Runtime Core
+    priority: P0
+    depends_on: [E08]
+    goal: >
+      Spike kanıtlandıktan sonra WorkflowRuntimePort arkasında üretim runtime'ı:
+      instance lifecycle, condition node, transactional outbox, idempotent inbox,
+      persisted timer, terminal guard, optimistic concurrency.
+    exit_criteria:
+      - State transition + outbox + audit aynı transaction'da atomik
+      - Duplicate event tek side effect üretiyor
+      - Worker restart sonrası süreç kayıpsız tamamlanıyor
+      - Terminal instance hiçbir yoldan ilerletilemiyor
+    open_locks: [LOCK-003]
+    blocked_by: E08
+    notes: "PRD §47'de ayrı listelenmemiştir; ilk dikey dilimin çalışması için zorunludur. Bkz. ASM-0005."
+
+  - id: E10
+    title: Sequential Approval
+    priority: P0
+    depends_on: [E09, E03]
+    goal: >
+      Sıralı onay motoru: ApprovalRequest/Step/Decision, sıra kontrolü, approve/reject/
+      changes_requested, duplicate approval koruması, self-approval engeli.
+      Zincir uzunluğu 1, 2 veya 3 adım olabilir; config'ten gelir.
+    exit_criteria:
+      - Sonraki adım, önceki tamamlanmadan aktifleşmiyor (1, 2 ve 3 adımlı zincirlerde)
+      - Aynı komut iki kez gönderilse tek karar oluşuyor (DB-level koruma)
+      - Requester kendi adımını onaylayamıyor
+      - Her karar immutable ve audit'li
+      - Kademe sayısı domain koduna hard-code EDİLMEMİŞ (config'ten okunuyor)
+    open_locks: []
+    notes: "Parallel, quorum ve delegation KAPSAM DIŞI. Zincir uzunluğu ASM-0001 eşiklerine göre 1-3 adım."
+
+  - id: E11
+    title: Task ve Inbox
+    priority: P0
+    depends_on: [E09, E03]
+    goal: Human task aggregate'i, assignee resolution ve kişisel inbox.
+    exit_criteria:
+      - Kullanıcı yalnız yetkili olduğu task'ları görüyor
+      - Inbox cursor pagination kullanıyor
+      - Geçersiz state transition reddediliyor; completion idempotent
+    open_locks: []
+
+  - id: E12
+    title: In-App Notification
+    priority: P0
+    depends_on: [E09]
+    goal: >
+      Provider-neutral NotificationChannelPort arkasında, outbox event'lerinden üretilen,
+      tenant-scoped, deduplike edilmiş uygulama içi bildirim.
+    exit_criteria:
+      - NotificationChannelPort KANAL-NÖTR tasarlandı (e-posta eklemek adapter işi olacak)
+      - Aynı business event/recipient için duplicate bildirim üretilmiyor
+      - Bildirim tenant scope'unda; read/unread ve deep link var
+    open_locks: []
+    notes: >
+      E-posta bildirimi Local MVP DIŞI, PILOT-READY kapsamında (ASM-0010).
+      MVP'de yalnız in-app adapter uygulanır; port şimdiden kanal-nötr olmalıdır.
+
+  - id: E13
+    title: Audit Log ve Instance Timeline
+    priority: P0
+    depends_on: [E09, E10]
+    goal: Append-only audit servisi ve kullanıcıya görünen instance timeline'ı.
+    exit_criteria:
+      - Audit append-only; update/delete kod yolu yok
+      - Audit, business transaction başarısızsa yazılmıyor
+      - Kritik aksiyonların tamamı (giriş, talep, onay kararı, publish, yetki reddi) audit'te
+      - Timeline'da human action / system action ayrışıyor
+    open_locks: []
+
+  - id: E14
+    title: Temel Dashboard
+    priority: P0
+    depends_on: [E10, E11]
+    goal: Bekleyen onay, açık talep ve tamamlanan süreç sayaçlarını gösteren yetki kontrollü dashboard.
+    exit_criteria:
+      - Dashboard metrikleri kaynak kayıtlarla tutarlı
+      - Operasyonel tablolar ağır sorgu ile yorulmuyor (read model)
+      - Kullanıcı yalnız yetkili olduğu veriyi görüyor
+    open_locks: []
+
+  - id: E15
+    title: Satın Alma E2E Demo
+    priority: P0
+    depends_on: [E06, E07, E09, E10, E11, E12, E13, E14]
+    goal: >
+      İlk dikey dilimin uçtan uca çalıştığının kanıtı:
+      giriş → organizasyon/membership → talep → koşul → sıralı onay → state transition →
+      bildirim → audit → timeline.
+    exit_criteria:
+      - Golden e2e test yeşil (happy path + ret + değişiklik talebi)
+      - Duplicate approval, duplicate event ve cross-tenant erişim testleri geçiyor
+      - Worker restart senaryosunda süreç doğru tamamlanıyor
+      - Demo kanıt paketi üretildi
+    open_locks: []
+
+dependency_graph: |
+  E00 → E01 → E02 → E03 → E04
+                 E03 → E05 → E06
+                       E05 → E07 → E08 → E09
+                                          E09 → E10 → E13
+                                          E09 → E11
+                                          E09 → E12
+                                          E10 → E14
+                                          E11 → E14
+  E06, E07, E09, E10, E11, E12, E13, E14 → E15

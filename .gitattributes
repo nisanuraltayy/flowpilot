@@ -1,0 +1,81 @@
+# FlowPilot — satır sonu ve diff normalizasyonu
+#
+# Amaç: Windows'ta geliştirip Linux container'da çalıştıracağız.
+# Repository'deki metin dosyaları HER ZAMAN LF ile saklanır; checkout'ta
+# platforma göre dönüştürülmez. Böylece core.autocrlf ayarı makineden makineye
+# farklı olsa bile diff'ler ve CI davranışı aynı kalır.
+
+# Varsayılan: metin dosyalarını otomatik algıla, repo'da LF olarak sakla
+*                text=auto eol=lf
+
+# ---------------------------------------------------------------- kaynak kodu
+*.py             text eol=lf
+*.pyi            text eol=lf
+*.ts             text eol=lf
+*.tsx            text eol=lf
+*.js             text eol=lf
+*.jsx            text eol=lf
+*.mjs            text eol=lf
+*.cjs            text eol=lf
+*.css            text eol=lf
+*.scss           text eol=lf
+*.html           text eol=lf
+*.sql            text eol=lf
+
+# ------------------------------------------------------------ config / doküman
+*.md             text eol=lf
+*.yaml           text eol=lf
+*.yml            text eol=lf
+*.json           text eol=lf
+*.toml           text eol=lf
+*.ini            text eol=lf
+*.cfg            text eol=lf
+*.env.example    text eol=lf
+.gitignore       text eol=lf
+.gitattributes   text eol=lf
+.editorconfig    text eol=lf
+Dockerfile       text eol=lf
+*.dockerfile     text eol=lf
+*.sh             text eol=lf
+
+# -------------------------------------------------- Windows script'leri: CRLF
+# Bu dosyalar Windows kabuğu tarafından çalıştırılır ve CRLF beklerler.
+*.ps1            text eol=crlf
+*.psm1           text eol=crlf
+*.psd1           text eol=crlf
+*.bat            text eol=crlf
+*.cmd            text eol=crlf
+
+# ------------------------------------- binary: text dönüşümünden HARİÇ tutulur
+*.png            binary
+*.jpg            binary
+*.jpeg           binary
+*.gif            binary
+*.webp           binary
+*.ico            binary
+*.svgz           binary
+*.pdf            binary
+*.zip            binary
+*.gz             binary
+*.tar            binary
+*.7z             binary
+*.woff           binary
+*.woff2          binary
+*.ttf            binary
+*.eot            binary
+*.otf            binary
+*.mp4            binary
+*.db             binary
+*.sqlite         binary
+*.sqlite3        binary
+*.pyc            binary
+*.pyd            binary
+*.so             binary
+*.dll            binary
+*.exe            binary
+
+# ------------------------------------------------------------ üretilmiş dosyalar
+# Lockfile'lar diff'te gürültü yapar; linguist ve review için işaretle.
+package-lock.json  linguist-generated=true
+uv.lock            linguist-generated=true
+poetry.lock        linguist-generated=true

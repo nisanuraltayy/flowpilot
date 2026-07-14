@@ -1,0 +1,2770 @@
+# FlowPilot — İlk Dikey Dilim: Satın Alma Talebi
+#
+# Bu dosya, ilk dikey dilimin makine tarafından okunabilir story backlog'udur.
+# Epic tanımları: docs/backlog/epics.yaml
+#
+# BAĞLAYICI KAPSAM KAYNAĞI: docs/product/mvp-scope-v0.1.md (owner-approved)
+# Diğer bağlayıcı kaynaklar: docs/adr/*, .claude/rules/*, docs/FlowPilot_Teknik_PRD_v0.2_Agent_Ready.md
+#
+# KURALLAR:
+#   - complexity yalnızca XS | S | M | L olabilir. XL YASAK.
+#   - Story "ready" değilse agent implementasyona BAŞLAMAZ.
+#   - Açık karar kilidi olan story "blocked" durumundadır.
+#   - Bu dosyadaki hiçbir story şu an implemente edilmemiştir. Repository bootstrap komutu bekleniyor.
+
+meta:
+  version: "0.2"
+  created_at: "2026-07-14"
+  updated_at: "2026-07-14"     # owner kararları işlendi (Supabase Auth, 3 kademeli eşik, port zorunlulukları)
+  scope_source: docs/product/mvp-scope-v0.1.md
+  slice: purchase-request
+  flow: >
+    Kullanıcı giriş yapar → organizasyon ve membership belirlenir → satın alma talebi oluşturur
+    (ürün/hizmet adı, kategori, tutar, para birimi, gerekçe, isteğe bağlı dosya) →
+    tutar güvenli ve deterministik condition evaluator ile değerlendirilir → talep sıralı onaya gider →
+    yetkili onaylar/reddeder/değişiklik ister → workflow instance doğru state transition ile ilerler →
+    in-app notification oluşur → kritik işlemler audit log'a yazılır → instance timeline görüntülenir.
+    Duplicate approval, duplicate event ve cross-tenant erişim engellenir.
+  invariants_reference: docs/architecture/domain-boundaries.md#4-sistem-geneli-invariantlar
+  personas:
+    requester: "Çalışan / talep sahibi"
+    approver: "Onaycı (ekip yöneticisi, finans yöneticisi)"
+    process_owner: "Süreç sahibi (satın alma / finans uzmanı)"
+    org_admin: "Organizasyon yöneticisi"
+    engineer: "Solo developer + AI coding agent"
+
+stories:
+
+  # ==========================================================================
+  # E00 — Repository Governance
+  # ==========================================================================
+
+  - id: FP-E00-001
+    title: Governance ve agent talimat dosyaları
+    epic_id: E00
+    persona: engineer
+    user_story: >
+      Bir AI coding agent olarak, hangi kuralların bağlayıcı olduğunu ve hangi kararların
+      kilitli olduğunu tek bir yerden okumak istiyorum; böylece kapsam dışına taşmadan
+      ve karar uydurmadan çalışabilirim.
+    business_value: >
+      Agent'in yanlış varsayımla üretim kodu yazmasını engeller. Yeniden çalışma maliyetini düşürür.
+    scope:
+      - CLAUDE.md (kısa, günlük geliştirme odaklı)
+      - AGENTS.md (çalışma protokolü, otonomi sınırları, teslim raporu)
+      - .claude/rules/{architecture,security,testing,database,git-workflow}.md
+      - Karar kilidi tablosu (LOCK-001..008)
+    out_of_scope:
+      - Repository scaffold, dependency, CI, Dockerfile
+      - PRD'nin CLAUDE.md içine kopyalanması
+    acceptance_criteria:
+      - id: AC-1
+        given: "Agent yeni bir göreve başladığında"
+        when: "CLAUDE.md okunduğunda"
+        then: "Kaynak öncelik sırası, aktif ADR'ler, karar kilitleri ve yasaklı davranışlar net görünür"
+      - id: AC-2
+        given: "Bir karar kilidi açıkken"
+        when: "Agent o alanda üretim kodu yazmayı denediğinde"
+        then: "AGENTS.md bunu açıkça yasaklar ve spike/ADR yolunu gösterir"
+    domain_rules:
+      - "Kaynak öncelik sırasında güvenlik > ADR > PRD > sözleşme > invariant > story"
+      - "Mevcut kod, üstteki bir kaynakla çeliştiğinde 'doğru' kabul edilmez"
+    security_requirements:
+      - "Yasaklı davranış listesi secret commit ve güvenlik kontrolü kapatmayı içerir"
+    audit_requirements: []
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "Manuel review: her kural dosyası bir bağlayıcı kaynağa (PRD bölümü / ADR) referans veriyor"
+    edge_cases:
+      - "CLAUDE.md ile AGENTS.md çelişirse AGENTS.md bağlayıcıdır (AGENTS.md'de açıkça yazılı)"
+    dependencies: []
+    definition_of_done:
+      - "Tüm governance dosyaları mevcut"
+      - "Karar kilitleri güncel durumlarıyla listeli"
+      - "Career Copilot bağımsızlığı açıkça yazılı"
+    complexity: S
+    status: done
+
+  - id: FP-E00-002
+    title: ADR süreci ve karar kaydı disiplini
+    epic_id: E00
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, mimari kararların neden verildiğini ve hangi kilidi kapattığını
+      izlemek istiyorum; böylece karar değiştiğinde geçmiş gerekçe kaybolmasın.
+    business_value: "Kararların geri döndürülebilirliğini ve devredilebilirliğini sağlar."
+    scope:
+      - docs/adr/README.md — süreç, durumlar, kayıt tablosu, şablon
+      - ADR-001..ADR-008
+      - "Her ADR'de: bağlam, seçenekler, karar, gerekçe, sonuçlar, uyum kuralları, yeniden değerlendirme tetikleyicileri"
+    out_of_scope:
+      - Açık kararların bu aşamada verilmesi (LOCK-004, LOCK-006, LOCK-007)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir mimari karar değiştiğinde"
+        when: "Yeni ADR yazıldığında"
+        then: "Eski ADR silinmez; 'Superseded by ADR-xxx' olarak işaretlenir"
+      - id: AC-2
+        given: "Bir ADR Proposed durumdayken"
+        when: "Agent o karara dayanan üretim kodu yazmayı denediğinde"
+        then: "Engellenir; karar owner onayı bekler"
+    domain_rules:
+      - "ADR durumları: Proposed | Accepted | Accepted (conditional) | Superseded | Rejected"
+      - "Proposed ADR üretim kodu için dayanak oluşturamaz"
+    security_requirements: []
+    audit_requirements:
+      - "Karar değişikliği ADR geçmişinde izlenebilir"
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "Her ADR bir durum, tarih ve (varsa) kapattığı kilidi belirtiyor"
+      - "docs/adr/README.md kayıt tablosu ADR dosyalarıyla tutarlı"
+    edge_cases:
+      - "Bir ADR koşullu kabul edildiğinde (ADR-004) koşulun ne olduğu ve nerede doğrulanacağı açıkça yazılı"
+    dependencies: [FP-E00-001]
+    definition_of_done:
+      - "8 ADR yazıldı ve kayıt tablosuna işlendi"
+      - "Açık kilitler open-questions.md ile bağlandı"
+    complexity: S
+    status: done
+
+  # ==========================================================================
+  # E01 — Authentication Boundary   (LOCK-004 KAPANDI — Supabase Auth, ADR-005)
+  # ==========================================================================
+
+  - id: FP-E01-001
+    title: Auth provider kararı (Supabase Auth seçildi)
+    epic_id: E01
+    persona: org_admin
+    user_story: >
+      Ürün sahibi olarak, kimlik doğrulama sağlayıcısını KVKK, maliyet, lock-in ve local
+      development kriterleriyle seçmek istiyorum; böylece geri dönüşü pahalı bir bağımlılığa
+      farkında olmadan girmeyeyim.
+    business_value: >
+      Veri yerleşimi (KVKK) itirazına cevap verebilme ve provider değiştirebilme özgürlüğü.
+    scope:
+      - ADR-005 karşılaştırma matrisi (11 kriter)
+      - Öneri ve gerekçe
+      - Owner kararı
+    out_of_scope:
+      - Gerçek provider entegrasyonu (FP-E01-002)
+      - SSO/SCIM
+    acceptance_criteria:
+      - id: AC-1
+        given: "İki aday aynı 11 kriterle puanlandığında"
+        when: "ADR-005 okunduğunda"
+        then: "Bir öneri ve o önerinin hangi koşulda değişeceği net görünür"
+      - id: AC-2
+        given: "Karar verildiğinde"
+        when: "ADR-005 Accepted olduğunda"
+        then: "LOCK-004 kapanır; Supabase yalnız AuthProviderPort adapter'ı olarak kullanılabilir"
+    domain_rules:
+      - "Supabase YALNIZCA authentication sağlayıcısıdır"
+      - "Organization, membership, manager hierarchy, RBAC, authorization ve tenant modeli FlowPilot domain'inde ve FlowPilot'ın PostgreSQL'indedir"
+      - "Supabase'in organizations/roles özelliklerine bağımlılık kurulamaz"
+    security_requirements:
+      - "In-house auth yazılmaz (parola hash, reset token, MFA provider sorumluluğundadır)"
+    audit_requirements: []
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: none
+    test_cases: []
+    edge_cases:
+      - "Pilot müşteri SSO/SCIM şart koşarsa Supabase kurumsal kademesi maliyet olarak yeniden değerlendirilir"
+    dependencies: [FP-E00-002]
+    definition_of_done:
+      - "Owner kararı verildi: Supabase Auth"
+      - "ADR-005 Accepted; LOCK-004 kapandı"
+      - "OQ-001 kapandı"
+    complexity: S
+    status: done             # ✅ 2026-07-14 — owner kararı: Supabase Auth
+
+  - id: FP-E01-002
+    title: AuthProviderPort sözleşmesi, Supabase adapter ve token doğrulama
+    epic_id: E01
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, kimlik doğrulamayı bir port arkasına almak istiyorum; böylece
+      Supabase'i sonradan değiştirmek gerekirse domain kodu değişmesin.
+    business_value: "Provider bağımsızlığı; lock-in maliyetinin düşürülmesi."
+    scope:
+      - AuthProviderPort sözleşmesi (token doğrulama, kullanıcı kimliği çözümleme)
+      - Supabase adapter (JWKS ile imza doğrulama; issuer, audience, expiry kontrolü)
+      - Fake adapter (local/test)
+      - Contract test seti (Supabase adapter ve fake adapter AYNI seti geçer)
+    out_of_scope:
+      - Supabase'in organizations/roles/RBAC özellikleri (KULLANILMAZ)
+      - Supabase veritabanının FlowPilot operasyonel DB'si olarak kullanılması (YASAK)
+      - MFA, SSO, device management
+    acceptance_criteria:
+      - id: AC-1
+        given: "Geçersiz imzalı, süresi dolmuş veya yanlış audience'lı bir token geldiğinde"
+        when: "İstek doğrulandığında"
+        then: "401 döner; hiçbir tenant verisine erişilmez; güvenlik log'una yazılır"
+      - id: AC-2
+        given: "Geçerli bir token geldiğinde"
+        when: "Actor çözümlendiğinde"
+        then: "Provider sub claim'i users.external_auth_id'ye eşlenir; e-posta primary key olarak kullanılmaz"
+      - id: AC-3
+        given: "E-postası doğrulanmamış bir kullanıcı"
+        when: "Tenant verisine erişmeyi denediğinde"
+        then: "Reddedilir"
+    domain_rules:
+      - "Doğrulanmamış claim yetki kaynağı olamaz"
+      - "Supabase SDK'sı YALNIZ adapter katmanında bulunur; domain'e sızamaz"
+      - "Supabase'in veritabanı/RLS'i FlowPilot'ın operasyonel veritabanı olarak KULLANILAMAZ"
+    security_requirements:
+      - "Token her istekte doğrulanır (JWKS imza, issuer, audience, expiry)"
+      - "Fake adapter production konfigürasyonunda kullanılamaz (build-time/config guard)"
+      - "Supabase service_role key backend'de saklanır, frontend'e ASLA gitmez"
+    audit_requirements:
+      - "Başarılı ve başarısız kimlik doğrulama audit'e yazılır"
+    observability_requirements:
+      - "auth_token_validation_total{result} metriği"
+      - "Her istekte request_id/correlation_id"
+    api_impact: "Tüm korumalı endpoint'ler Authorization header bekler"
+    data_model_impact: "users tablosu: id, external_auth_id (Supabase sub, unique), email, email_verified_at"
+    test_cases:
+      - "unit: token doğrulama (geçersiz imza, expired, yanlış issuer, yanlış audience)"
+      - "contract: fake adapter ve Supabase adapter AYNI contract test setini geçer"
+      - "integration: doğrulanmamış e-posta ile tenant verisine erişim reddedilir"
+      - "security: token olmadan korumalı endpoint 401"
+      - "fitness: domain katmanında Supabase SDK importu yok"
+    edge_cases:
+      - "JWKS anahtar rotasyonu sırasında eski anahtarla imzalanmış geçerli token"
+      - "Aynı e-posta ile farklı Supabase hesabı (external_auth_id farklı) → farklı kullanıcı"
+      - "Clock skew (token nbf/exp sınırında)"
+      - "Supabase erişilemezse: token offline (JWKS cache ile) doğrulanabilmeli — her istekte Supabase'e çağrı YAPILMAZ"
+    dependencies: [FP-E01-001]
+    definition_of_done:
+      - "Port + Supabase adapter + fake adapter + contract test seti tamam"
+      - "Domain'de Supabase SDK importu yok (fitness check geçiyor)"
+      - "Negatif auth testleri geçiyor"
+    complexity: M
+    status: draft            # LOCK-004 kapandı; bootstrap onayı bekliyor
+
+  - id: FP-E01-003
+    title: Actor context çözümleme ve session boundary
+    epic_id: E01
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, doğrulanmış token'dan actor ve tenant bağlamını tek bir yerde
+      çözmek istiyorum; böylece her handler bunu yeniden ve hatalı şekilde yapmasın.
+    business_value: "Tenant sızıntısının en yaygın kaynağını (dağınık context çözümleme) ortadan kaldırır."
+    scope:
+      - Actor (user | system | worker) modeli
+      - Token → user → membership → TenantContext zinciri
+      - Request ve worker giriş noktalarında bir kez çözümleme
+    out_of_scope:
+      - Impersonation / support access
+      - API key ile makine erişimi
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir istek geldiğinde"
+        when: "Actor context çözümlendiğinde"
+        then: "Tenant kimliği YALNIZCA doğrulanmış token → membership zincirinden gelir; istek gövdesinden veya query parametresinden ASLA okunmaz"
+      - id: AC-2
+        given: "Kullanıcı birden fazla organizasyona üyeyken"
+        when: "Aktif organizasyon seçildiğinde"
+        then: "Seçim membership ile doğrulanır; üye olmadığı organizasyon seçilemez"
+      - id: AC-3
+        given: "Bir worker outbox event işlerken"
+        when: "Tenant context kurulduğunda"
+        then: "Context event payload'ındaki tenant_id'den kurulur ve RLS'e tabi olur"
+    domain_rules:
+      - "Actor ≠ Requester (PRD §34)"
+      - "Worker da tenant context ile çalışır; BYPASSRLS kullanmaz"
+    security_requirements:
+      - "İstemciden gelen tenant_id değeri güvenilir kabul edilemez"
+      - "Üye olunmayan tenant'a geçiş 403 üretir ve audit'e yazılır"
+    audit_requirements:
+      - "Yetkisiz tenant geçiş denemesi security.authorization.denied olarak kaydedilir"
+    observability_requirements:
+      - "Her log satırında tenant_id, actor_id, request_id"
+    api_impact: "Aktif organizasyon seçimi için header veya session claim"
+    data_model_impact: none
+    test_cases:
+      - "security: Tenant A üyesi, Tenant B'yi aktif organizasyon olarak seçemez"
+      - "integration: worker context'i event payload'ından kurar"
+      - "unit: actor tipleri (user/system/worker) doğru ayrışır"
+    edge_cases:
+      - "Kullanıcı hiçbir organizasyona üye değilse (yeni kayıt)"
+      - "Membership suspend edildiğinde aktif session'ın davranışı"
+      - "Kullanıcı iki organizasyonda farklı rollere sahipse"
+    dependencies: [FP-E01-002, FP-E02-001]
+    definition_of_done:
+      - "TenantContext tek giriş noktasında çözülüyor"
+      - "Cross-tenant negatif testler geçiyor"
+      - "Membership FlowPilot DB'sinden okunuyor; Supabase'in org modeli KULLANILMIYOR"
+    complexity: M
+    status: draft            # LOCK-004 kapandı; bootstrap onayı bekliyor
+
+  # ==========================================================================
+  # E02 — Tenant ve Organization
+  # ==========================================================================
+
+  - id: FP-E02-001
+    title: Tenant aggregate ve organizasyon oluşturma
+    epic_id: E02
+    persona: org_admin
+    user_story: >
+      Bir kullanıcı olarak, bir organizasyon oluşturmak ve otomatik olarak owner olmak istiyorum;
+      böylece ekibimi davet edip süreçleri kurmaya başlayabileyim.
+    business_value: "Ürüne giriş noktası. Tenant sınırı burada doğar."
+    scope:
+      - Tenant aggregate (id, name, status, default_timezone, default_currency)
+      - Organizasyon oluşturma → oluşturan kullanıcıya owner membership (atomik)
+      - "Tenant status: active | scheduled_for_deletion"
+    out_of_scope:
+      - Owner transfer, tenant silme saga'sı, billing, team/department CRUD
+    acceptance_criteria:
+      - id: AC-1
+        given: "Doğrulanmış bir kullanıcı"
+        when: "Organizasyon oluşturduğunda"
+        then: "Tenant ve owner membership TEK transaction'da oluşur; biri başarısızsa hiçbiri yazılmaz"
+      - id: AC-2
+        given: "Bir tenant mevcutken"
+        when: "Tek owner'ın membership'i kaldırılmak istendiğinde"
+        then: "Reddedilir — tenant hiçbir anda owner'sız kalamaz"
+    domain_rules:
+      - "Bir tenant en az bir aktif owner'a sahiptir (PRD §36.1/2)"
+      - "Tenant timezone yalnız gösterim ve business calendar içindir; veri UTC saklanır"
+      - "Varsayılan para birimi tenant seviyesinde tanımlıdır"
+    security_requirements:
+      - "Organizasyon ayarlarını yalnız owner/admin değiştirebilir"
+      - "Tenant oluşturma rate limit'e tabidir"
+    audit_requirements:
+      - "organization.created — actor, tenant_id, timestamp"
+      - "Owner membership atanması audit'e yazılır"
+    observability_requirements:
+      - "organization_created_total metriği"
+    api_impact: "POST /v1/organizations"
+    data_model_impact: "tenants (id, name, status, timezone, default_currency, version, created_at); RLS politikası"
+    test_cases:
+      - "integration: tenant + owner membership atomik oluşur"
+      - "integration: transaction ortasında hata → hiçbiri yazılmaz"
+      - "unit: son owner kaldırılamaz"
+      - "security: başka tenant'ın ayarları okunamaz/değiştirilemez"
+    edge_cases:
+      - "Aynı isimde iki organizasyon (isim unique değildir, id unique'tir)"
+      - "Organizasyon oluşturma sırasında eşzamanlı çift istek (idempotency)"
+    dependencies: [FP-E01-002]
+    definition_of_done:
+      - "Atomiklik integration testle kanıtlandı"
+      - "RLS politikası mevcut ve testli"
+      - "Audit kaydı yazılıyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E02-002
+    title: Tenant-scoped repository boundary
+    epic_id: E02
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, tenant filtresini her sorguya elle yazmak zorunda kalmamak
+      istiyorum; böylece tek bir unutulmuş WHERE cümlesi veri sızıntısına dönüşmesin.
+    business_value: "PRD'nin normatif kuralı: tenant filtresi geliştiricinin hatırlamasına bırakılamaz."
+    scope:
+      - Repository/session boundary'sinde otomatik tenant scope
+      - Aggregate-specific repository pattern'i
+      - Tenant context olmadan tenant tablosuna sorgu → hata
+    out_of_scope:
+      - RLS politikalarının kendisi (FP-E04-002)
+      - Generic repository (YASAK)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir repository sorgusu çalıştırıldığında"
+        when: "Geliştirici tenant filtresi YAZMADIĞINDA"
+        then: "Filtre otomatik uygulanır; başka tenant'ın satırları asla dönmez"
+      - id: AC-2
+        given: "Tenant context kurulmamışken"
+        when: "Tenant tablosuna sorgu çalıştırıldığında"
+        then: "Kontrollü hata fırlatılır (sessizce tüm tenant'lar dönmez)"
+    domain_rules:
+      - "Generic repository YASAK; aggregate-specific repository kullanılır"
+    security_requirements:
+      - "Ham SQL yolu da tenant scope'una tabidir veya açıkça gerekçelendirilir"
+      - "BYPASSRLS yetkili rol kullanılmaz"
+    audit_requirements: []
+    observability_requirements:
+      - "Tenant context'siz sorgu denemesi warn seviyesinde loglanır"
+    api_impact: none
+    data_model_impact: "Tenant tablolarında tenant_id + (tenant_id, ...) composite index"
+    test_cases:
+      - "security: filtresiz yazılmış bir sorgu bile cross-tenant veri döndürmez"
+      - "integration: context'siz sorgu hata verir"
+      - "fitness: generic repository tanımı yok"
+    edge_cases:
+      - "Global (tenant'sız) tablolar: whitelist ile açıkça işaretlenir"
+      - "Worker sorguları da context ile çalışır"
+    dependencies: [FP-E02-001]
+    definition_of_done:
+      - "Otomatik scope kanıtlandı"
+      - "Whitelist dışı tenant'sız tablo yok (fitness check)"
+    complexity: M
+    status: draft
+
+  - id: FP-E02-003
+    title: Money value object (minor unit + currency)
+    epic_id: E02
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, para tutarlarını yuvarlama hatası üretmeyen bir tiple taşımak
+      istiyorum; böylece onay eşiği kararları (10.000 TL sınırı) deterministik olsun.
+    business_value: >
+      Bir kuruşluk yuvarlama hatası, yanlış onay zincirine yönlendirme demektir — finansal
+      süreçte kabul edilemez.
+    scope:
+      - "Money value object: amount_minor (integer) + currency (ISO-4217)"
+      - Karşılaştırma, toplama; farklı para biriminde işlem → domain hatası
+      - Gösterim/parse sınırında dönüşüm
+    out_of_scope:
+      - Kur çevrimi (multi-currency dönüşüm)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir tutar sisteme girdiğinde"
+        when: "Saklandığında"
+        then: "Integer minor unit + currency olarak saklanır; float ASLA kullanılmaz"
+      - id: AC-2
+        given: "İki farklı para biriminde tutar"
+        when: "Toplanmak veya karşılaştırılmak istendiğinde"
+        then: "Domain hatası fırlatılır; sessizce dönüştürülmez"
+      - id: AC-3
+        given: "Tutar tam olarak eşik değerindeyken (10.000,00 TL)"
+        when: "Koşul değerlendirildiğinde"
+        then: "Sınır davranışı deterministik ve dokümante edilmiştir (> mü >= mi)"
+    domain_rules:
+      - "Para float olarak tutulamaz (PRD §34.1, §39)"
+      - "amount + currency birlikte taşınır; currency'siz tutar geçersizdir"
+    security_requirements: []
+    audit_requirements: []
+    observability_requirements: []
+    api_impact: "API'de para {amount_minor, currency} olarak temsil edilir"
+    data_model_impact: "amount_minor BIGINT NOT NULL, currency CHAR(3) NOT NULL"
+    test_cases:
+      - "unit: sınır değerleri (9999.99 / 10000.00 / 10000.01)"
+      - "unit: farklı currency toplama → hata"
+      - "unit: negatif tutar reddedilir"
+      - "fitness: kod tabanında para alanı için float yok"
+    edge_cases:
+      - "Çok büyük tutar (integer overflow sınırı)"
+      - "Sıfır tutar"
+      - "Kuruşsuz para birimleri (JPY gibi) — MVP'de yalnız TRY, ancak model genel olmalı"
+    dependencies: []
+    definition_of_done:
+      - "Float kullanımı fitness check ile engellendi"
+      - "Sınır değer testleri geçiyor"
+    complexity: S
+    status: draft
+
+  # ==========================================================================
+  # E03 — Membership ve RBAC
+  # ==========================================================================
+
+  - id: FP-E03-001
+    title: Membership yaşam döngüsü
+    epic_id: E03
+    persona: org_admin
+    user_story: >
+      Bir organizasyon yöneticisi olarak, üyeleri davet etmek ve üyelik durumlarını yönetmek
+      istiyorum; böylece yalnız yetkili kişiler organizasyon verisine erişsin.
+    business_value: "Tenant erişim sınırının kaynağı membership'tir."
+    scope:
+      - "Membership aggregate: user_id, tenant_id, role, status"
+      - "Status: invited | active | suspended | removed"
+      - Davet oluşturma, kabul, süre dolumu
+    out_of_scope:
+      - Team/department hiyerarşisi, manager hierarchy (ilk dilimde onaycı rol ile çözülür)
+      - SCIM provisioning
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir davet gönderildiğinde"
+        when: "Davet süresi dolduğunda"
+        then: "Davet kabul edilemez; yeniden gönderim gerekir"
+      - id: AC-2
+        given: "Bir davet Tenant A için oluşturulduğunda"
+        when: "Farklı bir tenant bağlamında kabul edilmeye çalışıldığında"
+        then: "Reddedilir"
+      - id: AC-3
+        given: "Bir üyelik suspended olduğunda"
+        when: "Kullanıcı tenant verisine erişmeye çalıştığında"
+        then: "Reddedilir; aktif oturumu da etkiler"
+      - id: AC-4
+        given: "Aynı e-posta iki farklı organizasyonda üye olduğunda"
+        when: "Roller farklı olduğunda"
+        then: "Her tenant'ta kendi rolüyle çalışır; roller birbirine sızmaz"
+    domain_rules:
+      - "Rol global kullanıcıya değil, membership'e yazılır (PRD §34)"
+      - "Tenant hiçbir anda owner'sız kalamaz"
+    security_requirements:
+      - "Davet token'ı tek kullanımlık ve kısa ömürlüdür"
+      - "Account enumeration yapılmaz"
+      - "Üyelik değişikliği yalnız owner/admin tarafından yapılabilir"
+    audit_requirements:
+      - "membership.invited / accepted / suspended / removed — actor, before/after rol"
+    observability_requirements:
+      - "membership_status_change_total{from,to}"
+    api_impact: "POST /v1/organizations/{orgId}/invites; GET /v1/organizations/{orgId}/members"
+    data_model_impact: "memberships (id, tenant_id, user_id, role_id, status, version); unique(tenant_id, user_id); RLS"
+    test_cases:
+      - "integration: süresi dolmuş davet kabul edilemez"
+      - "security: davet başka tenant'a kabul edilemez"
+      - "security: suspended üye tenant verisine erişemez"
+      - "integration: aynı e-posta iki tenant'ta farklı rollerle çalışır"
+    edge_cases:
+      - "Davet edilen e-posta zaten üye ise"
+      - "Aynı davet iki kez kabul edilmeye çalışılırsa (idempotent)"
+      - "Suspended üyeye atanmış açık task/approval'ın durumu"
+    dependencies: [FP-E02-001]
+    definition_of_done:
+      - "Davet güvenlik testleri geçiyor"
+      - "Cross-tenant davet testi geçiyor"
+      - "Audit kayıtları before/after içeriyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E03-002
+    title: Role ve permission katalogu
+    epic_id: E03
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, yetkileri merkezi ve stabil anahtarlarla tanımlamak istiyorum;
+      böylece yetki mantığı kod tabanına dağılmasın.
+    business_value: "Yetki modelinin denetlenebilirliği ve genişletilebilirliği."
+    scope:
+      - "Sistem rolleri (ilk dilim): organization_owner, organization_admin, workflow_admin, manager, member"
+      - Permission katalogu (stabil key'ler)
+      - Rol → permission eşlemesi
+    out_of_scope:
+      - ABAC, field-level visibility, custom rol tanımlama, auditor/guest rolleri
+    acceptance_criteria:
+      - id: AC-1
+        given: "Yeni bir permission eklendiğinde"
+        when: "Merkezi katalogda tanımlı değilse"
+        then: "CI fitness check başarısız olur"
+      - id: AC-2
+        given: "Bir rol tanımlandığında"
+        when: "Permission'ları listelendiğinde"
+        then: "Yalnız katalogdaki stabil key'ler kullanılır"
+    domain_rules:
+      - "Workflow yayınlama yetkisi (workflow.definition.publish) oluşturma yetkisinden AYRIDIR"
+      - "Permission ≠ entitlement ≠ feature flag"
+    security_requirements:
+      - "İlk dilim permission'ları: purchase_request.create, purchase_request.read, approval.decide, workflow.definition.create, workflow.definition.publish, workflow.instance.read, task.read, audit.read, member.manage"
+    audit_requirements:
+      - "Rol/permission değişikliği before/after ile audit'e yazılır"
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: "roles, role_permissions (seed edilir; tenant'a özel rol MVP dışı)"
+    test_cases:
+      - "unit: rol → permission eşlemesi"
+      - "fitness: katalog dışı permission key'i yok"
+    edge_cases:
+      - "Owner rolü her permission'a sahiptir ancak bu 'bypass' olarak değil, açık eşleme olarak modellenir"
+    dependencies: [FP-E03-001]
+    definition_of_done:
+      - "Katalog seed edildi"
+      - "Fitness check aktif"
+    complexity: S
+    status: draft
+
+  - id: FP-E03-003
+    title: Merkezi authorization policy servisi
+    epic_id: E03
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, "bu actor bu kaynağa bu eylemi yapabilir mi?" sorusunu tek bir
+      yerde sormak istiyorum; böylece controller'lara dağılmış rol kontrolleri oluşmasın.
+    business_value: "Yetki ihlallerinin en yaygın sebebi olan dağınık kontrolü ortadan kaldırır."
+    scope:
+      - authorize(actor, action, resource) policy boundary
+      - Resource ownership policy (requester kendi talebini okuyabilir)
+      - Her protected endpoint bir policy adı belirtir
+      - Negatif authorization test harness'ı
+    out_of_scope:
+      - Field-level visibility
+      - Delegation
+    acceptance_criteria:
+      - id: AC-1
+        given: "Yetkisiz bir actor"
+        when: "Korumalı bir kaynağa eriştiğinde"
+        then: "Reddedilir; kaynağın VARLIĞI sızdırılmaz; security.authorization.denied audit'e yazılır"
+      - id: AC-2
+        given: "Bir talep sahibi"
+        when: "Kendi talebini okumak istediğinde"
+        then: "Ownership policy'si ile izin verilir (rolü yetmese bile)"
+      - id: AC-3
+        given: "Bir endpoint tanımlandığında"
+        when: "Authorization policy adı belirtilmediğinde"
+        then: "CI fitness check başarısız olur"
+    domain_rules:
+      - "Onaycı yalnız kendisine/rolüne atanmış AKTİF step üzerinde karar verebilir"
+      - "Controller içinde dağınık rol kontrolü YASAK"
+    security_requirements:
+      - "Yetkisiz butonu UI'da gizlemek yeterli değildir; backend enforcement zorunlu"
+      - "Her yetki reddi güvenlik log'una yazılır"
+    audit_requirements:
+      - "security.authorization.denied.v1 — actor, action, resource_type, resource_id"
+    observability_requirements:
+      - "authorization_denied_total{action} metriği ve anomali alarmı"
+    api_impact: "Tüm korumalı endpoint'ler policy adı ile işaretlenir"
+    data_model_impact: none
+    test_cases:
+      - "security: her korumalı endpoint için en az bir NEGATİF authorization testi"
+      - "security: member rolü başkasının talebini okuyamaz"
+      - "unit: ownership policy"
+      - "fitness: policy adı olmayan endpoint yok"
+    edge_cases:
+      - "Actor'ün rolü karar anında değişirse (yetki cache invalidation)"
+      - "Kaynak silinmiş/terminal ise yetki kontrolü hâlâ uygulanır"
+    dependencies: [FP-E03-002]
+    definition_of_done:
+      - "Negatif authorization suite'i çalışıyor"
+      - "Fitness check aktif"
+      - "Yetki reddi audit'e yazılıyor"
+    complexity: M
+    status: draft
+
+  # ==========================================================================
+  # E04 — Tenant İzolasyonu (Defense-in-Depth)
+  # ==========================================================================
+
+  - id: FP-E04-001
+    title: tenant_id zorunluluğu ve fitness check
+    epic_id: E04
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, tenant verisi taşıyan bir tabloyu tenant_id olmadan
+      oluşturamamak istiyorum; böylece izolasyon boşluğu daha CI'da yakalansın.
+    business_value: "Cross-tenant sızıntının en temel önkoşulunu (eksik tenant_id) yapısal olarak engeller."
+    scope:
+      - Tenant tablosu tanımı ve global tablo whitelist'i
+      - CI fitness check (FF-03)
+      - Composite index kuralı (tenant_id ile başlar)
+    out_of_scope:
+      - RLS politikalarının kendisi (FP-E04-002)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Yeni bir migration tenant verisi taşıyan tablo eklediğinde"
+        when: "tenant_id kolonu yoksa ve whitelist'te değilse"
+        then: "CI başarısız olur; merge engellenir"
+      - id: AC-2
+        given: "Bir liste sorgusu için index eklendiğinde"
+        when: "Composite index tanımlandığında"
+        then: "Index tenant_id ile başlar"
+    domain_rules:
+      - "Her tenant verisi tenant_id içerir (PRD §35.3/3)"
+    security_requirements:
+      - "Global tablo istisnası açıkça gerekçelendirilir ve gözden geçirilir"
+    audit_requirements: []
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: "Tüm tenant tabloları: tenant_id UUID NOT NULL"
+    test_cases:
+      - "fitness: tenant_id'siz tenant tablosu tespit edilir"
+    edge_cases:
+      - "users tablosu globaldir (kullanıcı birden fazla tenant'a üye olabilir) — whitelist'te"
+      - "roles/role_permissions seed verisidir — whitelist'te"
+    dependencies: [FP-E02-002]
+    definition_of_done:
+      - "FF-03 CI'da çalışıyor"
+      - "Whitelist gerekçeli"
+    complexity: S
+    status: draft
+
+  - id: FP-E04-002
+    title: PostgreSQL Row Level Security politikaları
+    epic_id: E04
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, uygulama filtresini unutsam bile veritabanının beni durdurmasını
+      istiyorum; böylece tek bir insan hatası veri sızıntısına dönüşmesin.
+    business_value: "İkinci bağımsız savunma katmanı. Sızıntı için iki ayrı hata gerekir."
+    scope:
+      - Her tenant tablosunda RLS politikası
+      - DB session'ının tenant context ile açılması
+      - Uygulama rolünün BYPASSRLS yetkisi OLMAMASI
+      - Worker bağlantılarının da RLS'e tabi olması
+    out_of_scope:
+      - Şema-per-tenant izolasyonu (reddedildi — ADR-006)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Uygulama tenant filtresi BİLİNÇLİ olarak kaldırılmış bir sorgu çalıştırdığında"
+        when: "Sorgu RLS altında çalıştığında"
+        then: "Yalnız aktif tenant'ın satırları döner; diğer tenant'ın satırları ASLA görünmez"
+      - id: AC-2
+        given: "Bir worker outbox event işlerken"
+        when: "DB session açtığında"
+        then: "Session tenant context ile açılır ve RLS'e tabidir"
+      - id: AC-3
+        given: "Yeni bir tenant tablosu eklendiğinde"
+        when: "Migration RLS politikası içermiyorsa"
+        then: "CI başarısız olur (FF-04)"
+    domain_rules:
+      - "RLS uygulama filtresinin YERİNE değil, İKİNCİ katman olarak bulunur"
+    security_requirements:
+      - "Uygulama BYPASSRLS yetkili rolle bağlanamaz"
+      - "RLS politikası her migration'da versiyonlanır"
+    audit_requirements: []
+    observability_requirements:
+      - "Kritik endpoint'lerde query plan regresyonu izlenir (RLS plan etkisi)"
+    api_impact: none
+    data_model_impact: "Her tenant tablosunda ENABLE ROW LEVEL SECURITY + policy"
+    test_cases:
+      - "security: filtresiz sorgu RLS tarafından boşa düşürülür"
+      - "security: worker RLS'e tabi (BYPASSRLS kullanmıyor)"
+      - "integration: RLS politikası her tenant tablosunda aktif"
+      - "fitness: FF-04"
+    edge_cases:
+      - "Migration çalıştıran rolün yetkisi (DDL için ayrı rol)"
+      - "RLS'in query plan'ı bozduğu ağır sorgular"
+      - "Connection pool'da tenant context'in bir sonraki isteğe SIZMASI — en kritik edge case; her istekte reset edilmeli"
+    dependencies: [FP-E04-001]
+    definition_of_done:
+      - "RLS'in tek başına çalıştığı kanıtlandı (filtresiz sorgu testi)"
+      - "Connection pool context sızıntısı testi geçti"
+      - "FF-04 aktif"
+    complexity: M
+    status: draft
+
+  - id: FP-E04-003
+    title: Cross-tenant regression suite
+    epic_id: E04
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, her yeni kaynak için cross-tenant erişim denemelerinin otomatik
+      test edilmesini istiyorum; böylece izolasyon bir kerelik değil, sürekli doğrulansın.
+    business_value: "PRD'de 'Kritik' etkili risk. Regresyon suite'i olmadan izolasyon iddiası kanıtsızdır."
+    scope:
+      - "IDOR/BOLA test harness'ı: iki tenant, tahmin edilen ID'lerle erişim denemeleri"
+      - "Kapsam: purchase request, workflow instance, approval step, task, notification, audit, document, dashboard"
+    out_of_scope:
+      - AI retrieval, search index (MVP'de arama basit)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Tenant A'nın actor'ü ve Tenant B'nin kaynak ID'si"
+        when: "Okuma, yazma, karar verme veya indirme denendiğinde"
+        then: "TÜM denemeler reddedilir ve kaynağın varlığı sızdırılmaz"
+      - id: AC-2
+        given: "Yeni bir tenant-scoped kaynak eklendiğinde"
+        when: "Suite'e eklenmediğinde"
+        then: "Story done sayılamaz"
+    domain_rules:
+      - "Hiçbir actor başka tenant'ın kaynağını okuyamaz veya değiştiremez (PRD §36.1/1)"
+    security_requirements:
+      - "Suite her PR'da çalışır ve KAPATILAMAZ"
+    audit_requirements:
+      - "Her cross-tenant deneme güvenlik log'una yazılır"
+    observability_requirements:
+      - "Cross-tenant deneme sayısı alarm üretir"
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "security: her tenant-scoped kaynak için okuma/yazma/karar denemesi reddedilir"
+      - "security: dosya indirme cross-tenant reddedilir"
+      - "security: dashboard başka tenant verisini saymaz"
+    edge_cases:
+      - "Cache'ten servis edilen yanıt (tenant-scoped cache key)"
+      - "Outbox event'in yanlış tenant context'iyle işlenmesi"
+    dependencies: [FP-E04-002]
+    definition_of_done:
+      - "Suite tüm temel kaynakları kapsıyor"
+      - "CI'da zorunlu kapı"
+    complexity: M
+    status: draft
+
+  # ==========================================================================
+  # E05 — Form Schema ve Validation
+  # ==========================================================================
+
+  - id: FP-E05-001
+    title: Versiyonlu form schema modeli
+    epic_id: E05
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, form şemasını workflow version'ına bağlamak istiyorum; böylece
+      formu değiştirdiğimde devam eden talepler bozulmasın.
+    business_value: "Form değişikliğinin devam eden süreçleri bozmasını engeller."
+    scope:
+      - Form schema aggregate; JSON Schema ile doğrulanan versiyonlu şema
+      - "Alan tipleri (ilk dilim): kısa metin, uzun metin, sayı, para, tek seçim, dosya"
+      - Şemanın workflow version'a bağlanması
+    out_of_scope:
+      - Form builder UX, koşullu görünürlük, hesaplanan alan, hassas alan sınıflandırması
+      - Diğer alan tipleri (tarih aralığı, kullanıcı seçimi, çoklu seçim vb.)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir workflow version yayınlandığında"
+        when: "Form şeması ona bağlandığında"
+        then: "Şema immutable olur; sonraki düzenlemeler yeni versiyon üretir"
+      - id: AC-2
+        given: "Yeni versiyonda bir alan silindiğinde"
+        when: "Eski versiyona bağlı instance okunduğunda"
+        then: "Eski instance'ın verisi KORUNUR ve görüntülenebilir"
+      - id: AC-3
+        given: "Geçersiz bir form şeması"
+        when: "Kaydedilmeye çalışıldığında"
+        then: "JSON Schema doğrulaması ile reddedilir"
+    domain_rules:
+      - "Form şeması workflow version ile birlikte değişmez biçimde saklanır (PRD §9.4)"
+      - "Form schema ile workflow version arasında referans bütünlüğü vardır"
+    security_requirements:
+      - "Şema istemciden güvenilmeden doğrulanır"
+    audit_requirements:
+      - "form_schema.created / bound_to_version"
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: "form_schemas (id, tenant_id, workflow_version_id, schema JSONB, version, created_at); JSONB versioned JSON Schema ile doğrulanır"
+    test_cases:
+      - "integration: yayınlanmış şema değiştirilemez"
+      - "integration: alan silinse de eski instance verisi okunabilir"
+      - "unit: geçersiz şema reddedilir"
+    edge_cases:
+      - "Aynı formun iki workflow version'ında farklı hâli"
+      - "Şemada bilinmeyen alan tipi → reddedilir"
+    dependencies: [FP-E03-003]
+    definition_of_done:
+      - "Immutability testi geçiyor"
+      - "Eski instance verisi korunuyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E05-002
+    title: Sunucu tarafı form validation
+    epic_id: E05
+    persona: requester
+    user_story: >
+      Bir talep sahibi olarak, eksik veya hatalı doldurduğum alanlarda anlaşılır hata almak
+      istiyorum; ve bir saldırgan olarak UI'ı bypass ederek geçersiz veri gönderememeliyim.
+    business_value: "Veri bütünlüğü ve güvenlik. UI validation tek başına güvenlik kontrolü değildir."
+    scope:
+      - Required, tip, min/max, uzunluk kuralları
+      - Alan bazlı hata mesajları (Problem Details benzeri format)
+      - Mass assignment koruması
+    out_of_scope:
+      - Koşullu görünürlük/düzenlenebilirlik kuralları
+    acceptance_criteria:
+      - id: AC-1
+        given: "UI bypass edilerek doğrudan API'ye geçersiz veri gönderildiğinde"
+        when: "İstek işlendiğinde"
+        then: "422 ile reddedilir; alan bazlı hata listesi döner; hiçbir kayıt oluşmaz"
+      - id: AC-2
+        given: "İstek gövdesinde şemada olmayan alanlar gönderildiğinde"
+        when: "İstek işlendiğinde"
+        then: "Bu alanlar entity'ye map EDİLMEZ (mass assignment koruması)"
+    domain_rules:
+      - "Sunucu tarafı validasyon zorunludur (PRD §9.4)"
+    security_requirements:
+      - "Mass assignment YASAK"
+      - "Hata mesajı iç yapıyı sızdırmaz"
+    audit_requirements: []
+    observability_requirements:
+      - "validation_error_total{field} metriği"
+    api_impact: "422 + errors[] (path, message) formatı; stabil error code"
+    data_model_impact: none
+    test_cases:
+      - "security: UI bypass ile geçersiz veri reddedilir"
+      - "security: mass assignment denemesi (ör. tenant_id veya status enjeksiyonu) engellenir"
+      - "unit: required/tip/min-max kuralları"
+    edge_cases:
+      - "Tutar alanına string gönderilmesi"
+      - "Çok uzun metin (DoS koruması)"
+      - "Unicode/emoji içeren girdiler"
+    dependencies: [FP-E05-001]
+    definition_of_done:
+      - "Bypass ve mass assignment testleri geçiyor"
+      - "Error formatı sözleşmede tanımlı"
+    complexity: M
+    status: draft
+
+  - id: FP-E05-003
+    title: Immutable form submission snapshot
+    epic_id: E05
+    persona: approver
+    user_story: >
+      Bir onaycı olarak, onayladığım anda talebin TAM OLARAK ne olduğunu sonradan
+      kanıtlayabilmek istiyorum; böylece talep sonradan değiştirilip kararım
+      başka bir şeye onay vermiş gibi görünmesin.
+    business_value: >
+      Denetlenebilirliğin temeli. Onay kararı, o anki veriye bağlanmazsa audit değersizdir.
+    scope:
+      - Form submission'ın immutable raw snapshot'ı
+      - Idempotent create (aynı idempotency key → tek submission)
+      - Revizyon durumunda YENİ snapshot (eskisi korunur)
+    out_of_scope:
+      - Revizyon talebi akışının kendisi (FP-E10-003)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir form gönderildiğinde"
+        when: "Snapshot yazıldığında"
+        then: "Snapshot değiştirilemez; sonraki düzenlemeler yeni snapshot üretir ve eskisi korunur"
+      - id: AC-2
+        given: "Aynı submission komutu iki kez gönderildiğinde (aynı idempotency key)"
+        when: "İkincisi işlendiğinde"
+        then: "Tek submission oluşur; ikinci istek aynı sonucu döner"
+    domain_rules:
+      - "Onay kararı hangi snapshot'a verildiği ile birlikte kaydedilir"
+    security_requirements:
+      - "Snapshot üzerinde UPDATE kod yolu yok"
+    audit_requirements:
+      - "form.submitted.v1 — submission_id, snapshot hash"
+    observability_requirements:
+      - "form_submission_total metriği"
+    api_impact: "Idempotency-Key header desteği"
+    data_model_impact: "form_submissions (id, tenant_id, workflow_instance_id, schema_id, data JSONB, snapshot_hash, created_at); append-only"
+    test_cases:
+      - "integration: aynı idempotency key ile iki istek → tek submission"
+      - "integration: snapshot değiştirilemez"
+      - "unit: snapshot hash hesabı deterministik"
+    edge_cases:
+      - "Aynı idempotency key FARKLI payload ile → 409 conflict"
+      - "Revizyon sonrası hangi snapshot'ın 'güncel' olduğu net"
+    dependencies: [FP-E05-002]
+    definition_of_done:
+      - "Idempotency testi geçiyor"
+      - "Immutability testi geçiyor"
+    complexity: M
+    status: draft
+
+  # ==========================================================================
+  # E06 — Purchase Request Submission
+  # ==========================================================================
+
+  - id: FP-E06-001
+    title: Satın alma talebi domain modeli
+    epic_id: E06
+    persona: requester
+    user_story: >
+      Bir çalışan olarak, ürün/hizmet adı, kategori, tutar, para birimi ve gerekçe girerek
+      satın alma talebi oluşturmak istiyorum; böylece talebim kayıt altına alınsın ve
+      doğru onay zincirine girsin.
+    business_value: "İlk dikey dilimin iş değeri. Talep kaybolmaz ve kurallara göre yönlendirilir."
+    scope:
+      - "PurchaseRequest aggregate: title, category, amount (Money), justification, requester_id"
+      - Talep numarası (insan okunabilir, tenant içinde unique)
+      - "Talep durumu: draft → submitted → in_approval → approved | rejected | changes_requested"
+    out_of_scope:
+      - Dosya eki (FP-E06-003)
+      - Bütçe kontrolü, tedarikçi yönetimi, PO oluşturma
+    acceptance_criteria:
+      - id: AC-1
+        given: "Zorunlu alanlar doldurulduğunda"
+        when: "Talep gönderildiğinde"
+        then: "Talep oluşur, workflow instance başlar ve requester'a görünür"
+      - id: AC-2
+        given: "Bir talep gönderildikten sonra"
+        when: "Requester tutarı değiştirmek istediğinde"
+        then: "Doğrudan değiştiremez; yalnız changes_requested durumunda izin verilen alanlar açılır"
+      - id: AC-3
+        given: "Tutar negatif veya sıfır olduğunda"
+        when: "Talep gönderildiğinde"
+        then: "Reddedilir"
+    domain_rules:
+      - "Tutar Money value object'idir (minor unit + currency); float YASAK"
+      - "Talep gönderildikten sonra form alanları kilitlenir"
+      - "Talep numarası tenant içinde unique ve tahmin edilemez olmalı (sıralı DB ID dışarı açılmaz)"
+    security_requirements:
+      - "purchase_request.create permission'ı gerekir"
+      - "Requester yalnız kendi talebini (veya yetkili olduğu talepleri) okuyabilir"
+      - "tenant_id istemciden alınmaz"
+    audit_requirements:
+      - "purchase_request.created — actor, tutar, kategori, snapshot hash"
+    observability_requirements:
+      - "purchase_request_created_total{category}"
+      - "Trace: talep oluşturma → workflow instance start"
+    api_impact: "POST /v1/purchase-requests (Idempotency-Key destekli); GET /v1/purchase-requests/{id}"
+    data_model_impact: "purchase_requests (id, tenant_id, request_number, title, category, amount_minor, currency, justification, requester_id, status, workflow_instance_id, version); RLS"
+    test_cases:
+      - "integration: talep oluşturma → instance start atomik"
+      - "unit: negatif/sıfır tutar reddedilir"
+      - "security: cross-tenant talep okuma reddedilir"
+      - "security: member başkasının talebini okuyamaz"
+      - "integration: gönderilmiş talebin alanları kilitli"
+    edge_cases:
+      - "Eşzamanlı çift gönderim (idempotency)"
+      - "Çok büyük tutar"
+      - "Kategori enum'unda olmayan değer"
+    dependencies: [FP-E05-003, FP-E02-003]
+    definition_of_done:
+      - "Cross-tenant ve ownership testleri geçiyor"
+      - "Para float değil (fitness check)"
+      - "Audit kaydı yazılıyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E06-002
+    title: Satın alma form şeması ve kategori seti
+    epic_id: E06
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, satın alma formunun alanlarını tanımlamak istiyorum; böylece
+      çalışanlar eksiksiz talep göndersin.
+    business_value: "Yapılandırılmış talep toplama — dağınık e-postanın yerine geçen ana değer."
+    scope:
+      - "Satın alma form şeması (JSON): ürün/hizmet adı, kategori, tutar, para birimi, gerekçe, dosya (opsiyonel)"
+      - Kategori seti (ör. Yazılım, Donanım, Danışmanlık, Ofis, Diğer)
+      - Şemanın satın alma workflow version'ına bağlanması
+    out_of_scope:
+      - Kategoriye göre farklı form gösterimi
+      - Tenant'a özel form özelleştirme sihirbazı
+    acceptance_criteria:
+      - id: AC-1
+        given: "Satın alma workflow'u yayınlandığında"
+        when: "Form şeması bağlandığında"
+        then: "Şema immutable olur ve instance'lar bu şemaya göre doğrulanır"
+      - id: AC-2
+        given: "Gerekçe alanı boş bırakıldığında"
+        when: "Talep gönderildiğinde"
+        then: "Sunucu tarafında reddedilir (required)"
+    domain_rules:
+      - "Para alanı Money value object'ine map edilir"
+    security_requirements:
+      - "Şema sunucu tarafında doğrulanır"
+    audit_requirements: []
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: "form_schemas içinde satın alma şeması (seed)"
+    test_cases:
+      - "unit: şema JSON Schema doğrulamasından geçer"
+      - "integration: eksik zorunlu alan reddedilir"
+    edge_cases:
+      - "Para birimi TRY dışında gönderilirse (MVP'de tenant default currency ile sınırlı)"
+    dependencies: [FP-E05-001, FP-E06-001]
+    definition_of_done:
+      - "Şema seed edildi ve workflow version'a bağlandı"
+    complexity: S
+    status: draft
+
+  - id: FP-E06-003
+    title: Talebe isteğe bağlı dosya eki (S3-compatible storage portu)
+    epic_id: E06
+    persona: requester
+    user_story: >
+      Bir çalışan olarak, talebe teklif/fatura dosyası eklemek istiyorum; böylece onaycı
+      kararını belgeye bakarak versin.
+    business_value: "Onaycının bağlama erişmesi — kararın kalitesi."
+    scope:
+      - FileStoragePort (S3-compatible); local development için MinIO adayı
+      - MalwareScanPort — SAĞLAYICI-NÖTR port tasarımı; MVP'de yalnız no-op/stub adapter
+      - scan_status alanı ve tarama tamamlanmadan indirmeyi engelleyen kapı (ŞİMDİDEN hazır)
+      - Presigned upload URL + finalize command
+      - MIME/boyut policy
+      - Yetki kontrollü indirme
+      - Document → PurchaseRequest link
+    out_of_scope:
+      - GERÇEK malware tarama entegrasyonu → PILOT-READY zorunlu güvenlik çıkış kriteri (ASM-0007)
+      - Doküman versiyonlama, OCR, önizleme
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir kullanıcı dosya yüklediğinde"
+        when: "Upload gerçekleştiğinde"
+        then: "Dosya içeriği API process memory'sinden GEÇMEZ; presigned URL kullanılır"
+      - id: AC-2
+        given: "Tenant A'nın kullanıcısı"
+        when: "Tenant B'nin dosyasını indirmeye çalıştığında"
+        then: "Reddedilir; object storage path'i tenant ile ayrılmıştır"
+      - id: AC-3
+        given: "İzin verilmeyen MIME tipi veya boyut sınırı aşıldığında"
+        when: "Upload denendiğinde"
+        then: "Reddedilir"
+      - id: AC-4
+        given: "Upload URL alındıktan sonra finalize edilmediğinde"
+        when: "Belirli süre geçtiğinde"
+        then: "Yetim (orphan) obje temizlenir veya işaretlenir"
+    domain_rules:
+      - "Presigned upload pattern zorunlu (PRD §38.13)"
+      - "Tarama tamamlanmadan restricted dosya indirilemez — kapı MVP'de HAZIRDIR, tarama adapter'ı stub'dır"
+      - "MalwareScanPort sağlayıcı-nötr; gerçek tarama eklemek bir ADAPTER işidir, refactor DEĞİL"
+    security_requirements:
+      - "Presigned URL kısa TTL'li"
+      - "İndirme her seferinde authorization kontrolünden geçer"
+      - "Object storage path'i tenant ile izole"
+      - "Dosya tipi doğrulama yalnız uzantıya değil, içerik tipine de bakar"
+      - "PILOT KAPISI: gerçek tarama entegre edilmeden Local MVP pilot müşteriye AÇILMAZ (ASM-0007)"
+    audit_requirements:
+      - "document.uploaded / document.downloaded — actor, document_id"
+    observability_requirements:
+      - "document_upload_total, document_download_total"
+    api_impact: "POST /v1/documents/upload-url; POST /v1/documents/{id}/complete-upload; GET /v1/documents/{id}/download-url"
+    data_model_impact: "documents (id, tenant_id, storage_key, mime, size_bytes, scan_status, uploaded_by); document_links (document_id, resource_type, resource_id); RLS"
+    test_cases:
+      - "security: cross-tenant dosya indirme reddedilir"
+      - "security: yetkisiz kullanıcı indiremez"
+      - "integration: MIME/boyut policy uygulanır"
+      - "integration: presigned URL süresi dolduğunda upload reddedilir"
+      - "contract: FileStoragePort fake ve MinIO adapter'ı aynı contract testini geçer"
+    edge_cases:
+      - "Upload tamamlanmadan talep gönderilirse"
+      - "Aynı dosya iki kez finalize edilirse (idempotent)"
+      - "Storage sağlayıcısı yanıt vermezse (timeout + kullanıcıya net hata)"
+    dependencies: [FP-E06-001]
+    definition_of_done:
+      - "Cross-tenant dosya testi geçiyor"
+      - "Presigned pattern kanıtlandı (dosya API'den geçmiyor)"
+      - "Port contract testi geçiyor"
+    complexity: M
+    status: draft
+
+  # ==========================================================================
+  # E07 — Workflow Publish ve Versioning
+  # ==========================================================================
+
+  - id: FP-E07-001
+    title: Workflow draft aggregate ve optimistic concurrency
+    epic_id: E07
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, workflow taslağını düzenlerken başka birinin değişikliğini
+      sessizce ezmemek istiyorum.
+    business_value: "Süreç tanımının kaybolmadan ve çakışmadan düzenlenebilmesi."
+    scope:
+      - WorkflowDraft aggregate (nodes, edges, config, version alanı)
+      - Optimistic concurrency (409 Conflict)
+      - Draft'tan yeni draft oluşturma
+    out_of_scope:
+      - Görsel canvas (MVP DIŞI)
+      - Undo/redo, autosave UX
+    acceptance_criteria:
+      - id: AC-1
+        given: "İki actor aynı draft'ı aynı version ile okuduğunda"
+        when: "İkisi de kaydetmeye çalıştığında"
+        then: "Biri başarılı olur; diğeri 409 alır; hiçbir değişiklik sessizce KAYBOLMAZ"
+      - id: AC-2
+        given: "Published bir workflow varken"
+        when: "Yeni draft oluşturulduğunda"
+        then: "Published kayıt DEĞİŞMEZ; yeni draft ayrı kayıt olur"
+    domain_rules:
+      - "published → draft geçişi YASAK; yeni draft ayrı kayıttır"
+    security_requirements:
+      - "workflow.definition.create permission'ı gerekir"
+    audit_requirements:
+      - "workflow.draft.created / updated"
+    observability_requirements:
+      - "workflow_draft_conflict_total"
+    api_impact: "POST /v1/workflows/{id}/drafts; PUT /v1/workflows/{id}/drafts/{draftId} (If-Match)"
+    data_model_impact: "workflows, workflow_drafts (id, tenant_id, definition JSONB, version); RLS"
+    test_cases:
+      - "integration: eşzamanlı düzenleme → 409, veri kaybı yok"
+      - "integration: yeni draft published'ı değiştirmez"
+      - "security: workflow_admin olmayan kullanıcı draft oluşturamaz"
+    edge_cases:
+      - "Aynı workflow'dan iki draft aynı anda oluşturulursa"
+      - "Draft silinirken published version'a etkisi olmamalı"
+    dependencies: [FP-E03-003]
+    definition_of_done:
+      - "Concurrency testi geçiyor"
+      - "Published immutability korunuyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E07-002
+    title: Node/edge şeması ve graph validation
+    epic_id: E07
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, hatalı bir süreci yayınlayamamak istiyorum; böylece çalışanların
+      talepleri asılı kalmasın.
+    business_value: "Bozuk workflow = asılı kalan talep = kaybolan iş. Yayın öncesi doğrulama zorunludur."
+    scope:
+      - "MVP node seti şeması: Start, Form, Condition, Sequential Approval, Notification, End"
+      - Edge kısıtları
+      - "Graph validation: yetim node, ulaşılamayan End, Start'tan erişilemeyen node, döngü"
+      - Node config şeması (her node tipi için ayrı)
+    out_of_scope:
+      - Parallel split/join, quorum, sub-workflow, webhook, script, AI, DMN node'ları (KAPSAM DIŞI)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir workflow tanımında yetim node veya ulaşılamayan End bulunduğunda"
+        when: "Validation çalıştığında"
+        then: "Hata listesi üretilir; yayınlama ENGELLENİR"
+      - id: AC-2
+        given: "MVP node seti dışında bir node tipi tanımlandığında"
+        when: "Validation çalıştığında"
+        then: "Bilinmeyen node tipi reddedilir; yayınlanamaz"
+      - id: AC-3
+        given: "Bir Condition node'unda hiçbir branch eşleşmediğinde"
+        when: "Validation çalıştığında"
+        then: "Default branch zorunluluğu kontrol edilir (asılı kalma riski engellenir)"
+    domain_rules:
+      - "Bilinmeyen node türü yayınlanamaz (PRD §12)"
+      - "Her node'dan End'e ulaşılabilir olmalı"
+    security_requirements:
+      - "Definition JSON istemciden güvenilmeden doğrulanır"
+      - "Condition expression'ları güvenli DSL parser'ından geçer (eval YASAK)"
+    audit_requirements: []
+    observability_requirements:
+      - "workflow_validation_error_total{error_type}"
+    api_impact: "POST /v1/workflows/{id}/validate"
+    data_model_impact: "workflow_nodes, workflow_edges (version'a bağlı, immutable)"
+    test_cases:
+      - "unit: yetim node tespit edilir"
+      - "unit: ulaşılamayan End tespit edilir"
+      - "unit: bilinmeyen node tipi reddedilir"
+      - "unit: Condition'da default branch yoksa uyarı/hata"
+      - "fitness: MVP node seti dışında node tipi tanımlı değil (FF-16)"
+    edge_cases:
+      - "Tek node'lu workflow (Start → End)"
+      - "Kendine dönen edge (self-loop)"
+      - "Çok büyük graph (node sayısı sınırı)"
+    dependencies: [FP-E07-001]
+    definition_of_done:
+      - "Validation hata tipleri testli"
+      - "MVP node seti fitness check'i aktif"
+    complexity: M
+    status: draft
+
+  - id: FP-E07-003
+    title: Workflow publish — immutable version ve hash
+    epic_id: E07
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, yayınladığım sürecin bir daha değişmeyeceğinden emin olmak
+      istiyorum; böylece devam eden talepler güvende olsun ve kararlar denetlenebilsin.
+    business_value: >
+      PRD'nin en kritik invariant'larından biri. Published version değişirse tüm audit trail
+      anlamını yitirir.
+    scope:
+      - "Publish komutu: validation + yetki + immutable version + hash + audit (ATOMİK)"
+      - "Version durumları: draft | published | deprecated | archived"
+      - Published version üzerine UPDATE yolunun kapatılması
+    out_of_scope:
+      - Version diff görünümü, dört göz prensibi, dry-run test modu
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir workflow yayınlandığında"
+        when: "Version kaydı oluştuğunda"
+        then: "Kayıt immutable'dır; içerik hash'lenir; sonraki hiçbir işlem onu DEĞİŞTİREMEZ"
+      - id: AC-2
+        given: "Publish işlemi sırasında bir hata oluştuğunda"
+        when: "Transaction geri alındığında"
+        then: "Ne version, ne hash, ne audit kaydı yazılır (atomiklik)"
+      - id: AC-3
+        given: "workflow.definition.publish permission'ı olmayan bir kullanıcı"
+        when: "Yayınlamayı denediğinde"
+        then: "403 alır; audit'e yazılır"
+      - id: AC-4
+        given: "Validation hatası olan bir draft"
+        when: "Yayınlanmaya çalışıldığında"
+        then: "Reddedilir"
+    domain_rules:
+      - "Published workflow version IMMUTABLE'dır (PRD §36.1/3, ADR-004)"
+      - "Yayınlama yetkisi oluşturma yetkisinden ayrıdır"
+      - "Yayınlanan içerik hash'lenir; runtime hash'i doğrular"
+    security_requirements:
+      - "Publish permission kontrolü + audit"
+      - "Published tablolara UPDATE çalıştıran kod yolu YOK (FF-11)"
+    audit_requirements:
+      - "workflow.definition.published.v1 — actor, version, hash"
+    observability_requirements:
+      - "workflow_published_total"
+    api_impact: "POST /v1/workflows/{id}/publish"
+    data_model_impact: "workflow_versions (id, tenant_id, workflow_id, version_no, definition JSONB, content_hash, published_by, published_at); append-only"
+    test_cases:
+      - "integration: published version değiştirilemez (SPK-01 ile örtüşür)"
+      - "integration: publish atomik (hata → hiçbiri yazılmaz)"
+      - "security: yetkisiz publish 403 + audit"
+      - "fitness: FF-11 (published'a UPDATE yok)"
+    edge_cases:
+      - "Aynı draft iki kez yayınlanırsa (idempotent veya 409)"
+      - "Eşzamanlı publish → version numarası çakışması (unique constraint)"
+      - "Hash hesabının JSON key sırasına duyarlı olmaması (canonical serialization)"
+    dependencies: [FP-E07-002]
+    definition_of_done:
+      - "Immutability testi geçiyor"
+      - "Atomiklik testi geçiyor"
+      - "FF-11 aktif"
+    complexity: M
+    status: draft
+
+  # ==========================================================================
+  # E08 — Workflow Runtime Spike   (LOCK-003 — spike geçmeden üretim kodu YASAK)
+  # Plan: docs/architecture/workflow-runtime-spike-plan.md
+  # ==========================================================================
+
+  - id: FP-E08-001
+    title: Spike harness ve referans akış
+    epic_id: E08
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, custom runtime'ın 12 kriterini AYNI referans akış üzerinde
+      test edebileceğim bir harness kurmak istiyorum; böylece kanıtlar karşılaştırılabilir olsun.
+    business_value: "Runtime kararının ucuza ve kanıta dayalı verilmesi."
+    scope:
+      - "Referans akış: Start → Form → Condition → Sequential Approval → Notification → End"
+      - İki tenant, iki onaycı, iki tutar senaryosu (≤10.000 TL ve >10.000 TL)
+      - Fake clock, process kill/restart harness'ı, fault injection
+      - Kanıt toplama (test çıktısı, DB durumu, log)
+    out_of_scope:
+      - Üretim kalitesinde kod, UI, gerçek auth provider
+      - MVP dışı node'lar
+    acceptance_criteria:
+      - id: AC-1
+        given: "Spike harness'ı kurulduğunda"
+        when: "Referans akış çalıştırıldığında"
+        then: "Her kriter için tekrarlanabilir kanıt üretilebilir"
+      - id: AC-2
+        given: "Spike kodu yazıldığında"
+        when: "main branch'e bakıldığında"
+        then: "Spike kodu üretim kodu olarak merge EDİLMEMİŞTİR"
+    domain_rules:
+      - "Spike çıktısı KARAR ve KANITTIR, ürün değildir"
+    security_requirements:
+      - "Spike'ta bile cross-tenant senaryosu test edilir (SPK-10)"
+    audit_requirements: []
+    observability_requirements:
+      - "Timer gecikmesi ve worker lag ölçülebilir olmalı"
+    api_impact: none
+    data_model_impact: "Spike şeması (üretim migration'ı DEĞİL)"
+    test_cases:
+      - "Harness: process kill/restart otomatik çalışıyor"
+      - "Harness: fake clock ile timer ileri alınabiliyor"
+      - "Harness: fault injection commit öncesi hata enjekte edebiliyor"
+    edge_cases:
+      - "Harness'ın kendisinin flaky olması → kanıt güvenilmez olur; deterministik olmalı"
+    dependencies: [FP-E07-003]
+    definition_of_done:
+      - "Harness deterministik ve tekrarlanabilir"
+      - "Referans akış çalışıyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E08-002
+    title: Spike kanıtı — versioning ve determinizm (SPK-01, SPK-02, SPK-03)
+    epic_id: E08
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, published version'ın immutable olduğunu, instance'ın version'a
+      bağlı kaldığını ve condition evaluator'ın deterministik/güvenli olduğunu kanıtlamak istiyorum.
+    business_value: "Devam eden süreçlerin güvenliği ve onay yönlendirmesinin doğruluğu."
+    scope:
+      - "SPK-01: Published workflow version immutable"
+      - "SPK-02: Instance belirli version'a bağlı"
+      - "SPK-03: Condition node doğru branch'i seçiyor (sınır değerleri, zararlı payload)"
+    out_of_scope:
+      - Diğer 9 kriter
+    acceptance_criteria:
+      - id: AC-1
+        given: "v1 yayınlanmış ve bir instance beklerken v2 yayınlandığında"
+        when: "Bekleyen instance ilerletildiğinde"
+        then: "v1 semantiğiyle tamamlanır; v2'den ETKİLENMEZ"
+      - id: AC-2
+        given: "Tutar tam olarak eşik değerindeyken (9999.99 / 10000.00 / 10000.01)"
+        when: "Condition değerlendirildiğinde"
+        then: "Doğru branch seçilir ve seçim gerekçesi açıklanabilir"
+      - id: AC-3
+        given: "Condition ifadesinde zararlı bir payload gönderildiğinde"
+        when: "Evaluator çalıştığında"
+        then: "Parser tarafından REDDEDİLİR; hiçbir kod çalıştırılmaz"
+    domain_rules:
+      - "Runtime, node tanımını instance'ın bağlı olduğu version'dan okur — asla 'son version'dan değil"
+      - "eval/exec YASAK"
+    security_requirements:
+      - "Kod çalıştırma yolu yok (FF-08)"
+    audit_requirements: []
+    observability_requirements:
+      - "Condition seçim gerekçesi loglanır/açıklanır"
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "SPK-01: publish öncesi/sonrası hash karşılaştırması + UPDATE yolu yok"
+      - "SPK-02: iki instance farklı version'larla farklı yollardan tamamlanır"
+      - "SPK-03: sınır değer tablosu + zararlı payload reddi + determinizm (aynı girdi → aynı çıktı)"
+    edge_cases:
+      - "Float yuvarlama nedeniyle sınır değerde yanlış branch (minor unit bunu engeller)"
+      - "Eksik/null tutar → kontrollü hata (sessiz false DEĞİL)"
+      - "Farklı para birimi"
+    dependencies: [FP-E08-001]
+    definition_of_done:
+      - "SPK-01, SPK-02, SPK-03 kanıt paketiyle geçti"
+    complexity: M
+    status: draft
+
+  - id: FP-E08-003
+    title: Spike kanıtı — eşzamanlılık ve idempotency (SPK-04, SPK-05, SPK-06, SPK-12)
+    epic_id: E08
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, duplicate approval ve duplicate event'in tek side effect
+      ürettiğini kanıtlamak istiyorum; böylece çift onay veya çift bildirim oluşmasın.
+    business_value: >
+      Çift onay finansal bir süreçte doğrudan zarardır. Bu, ürünün güvenilirlik iddiasının merkezi.
+    scope:
+      - "SPK-04: Sıralı onayda ikinci adım birinci tamamlanmadan aktif olmuyor"
+      - "SPK-05: Aynı approval command iki kez → tek karar"
+      - "SPK-06: Aynı outbox event iki kez → duplicate side effect yok"
+      - "SPK-12: Optimistic concurrency conflict kontrollü hata üretiyor"
+    out_of_scope:
+      - Durability kriterleri (FP-E08-004)
+    acceptance_criteria:
+      - id: AC-1
+        given: "İki adımlı onay zincirinde birinci adım beklerken"
+        when: "İkinci onaycı doğrudan karar vermeye çalıştığında"
+        then: "403/409 ile reddedilir; HİÇBİR karar kaydı oluşmaz; step pending kalır"
+      - id: AC-2
+        given: "Aynı approval step'e EŞZAMANLI iki karar komutu gönderildiğinde"
+        when: "İkisi de işlendiğinde"
+        then: "approval_decisions tablosunda TAM OLARAK BİR kayıt; tek state transition; tek notification"
+      - id: AC-3
+        given: "Aynı outbox event (aynı event_id) iki kez dispatch edildiğinde"
+        when: "İkincisi işlendiğinde"
+        then: "Hiçbir yeni side effect oluşmaz (tek notification, tek task, tek audit)"
+      - id: AC-4
+        given: "Aynı aggregate'e eşzamanlı iki yazma"
+        when: "İkisi de commit etmeye çalıştığında"
+        then: "Biri 409 alır; sessiz overwrite YOK; veri kaybı YOK"
+    domain_rules:
+      - "Duplicate koruması VERİTABANI düzeyinde olmalı (unique constraint + optimistic lock); uygulama seviyesinde 'önce oku, yoksa yaz' YETERSİZDİR"
+      - "at-least-once + idempotent consumer; 'exactly once' iddiası YASAK"
+    security_requirements:
+      - "Erken karar denemesi audit'e yazılır"
+    audit_requirements:
+      - "Duplicate/erken karar denemeleri izlenebilir"
+    observability_requirements:
+      - "duplicate_command_rejected_total, concurrency_conflict_total"
+    api_impact: none
+    data_model_impact: "unique constraint: approval_step_id başına tek terminal decision; processed_events tablosu"
+    test_cases:
+      - "SPK-04: erken karar denemesi reddedilir; birinci onay sonrası ikinci step aktifleşir"
+      - "SPK-05: paralel iki istek → 1 karar (DB satır sayısı = 1)"
+      - "SPK-06: duplicate dispatch → side effect tablolarında satır sayısı sabit"
+      - "SPK-12: eşzamanlı yazma → 409, veri kaybı yok, deadlock yok"
+    edge_cases:
+      - "İki FARKLI onaycının aynı step'e eşzamanlı karar vermesi"
+      - "Idempotency kontrolünün side effect'ten SONRA yapılması (yanlış implementasyon)"
+      - "Retry'ın conflict'i sonsuz döngüye sokması (bounded retry zorunlu)"
+    dependencies: [FP-E08-002]
+    definition_of_done:
+      - "SPK-04, SPK-05, SPK-06, SPK-12 kanıt paketiyle geçti"
+    complexity: L
+    status: draft
+
+  - id: FP-E08-004
+    title: Spike kanıtı — durability, izolasyon ve atomiklik (SPK-07..SPK-11)
+    epic_id: E08
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, worker çöktüğünde sürecin kaybolmadığını, timer'ın restart'tan
+      sağ çıktığını ve state+outbox+audit'in atomik olduğunu kanıtlamak istiyorum.
+    business_value: >
+      "Talepler kaybolmaz" ürün vaadinin teknik karşılığı. Bu kanıtlanamazsa custom runtime
+      terk edilmelidir.
+    scope:
+      - "SPK-07: Worker kill/restart → süreç kayıpsız"
+      - "SPK-08: Persisted timer restart sonrası çalışıyor"
+      - "SPK-09: Terminal instance yeni node başlatamıyor"
+      - "SPK-10: Cross-tenant actor başka tenant instance'ına erişemiyor"
+      - "SPK-11: State + outbox + audit aynı transaction'da tutarlı"
+    out_of_scope:
+      - Performans/yük testi (spike kapsamı değil)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir event işlenirken worker SIGKILL ile öldürüldüğünde"
+        when: "Worker yeniden başlatıldığında"
+        then: "Süreç doğru tamamlanır; instance asılı KALMAZ; duplicate side effect OLUŞMAZ"
+      - id: AC-2
+        given: "Bir timer planlandıktan sonra worker öldürüldüğünde"
+        when: "Worker yeniden başlatıldığında ve vade geldiğinde"
+        then: "Timer TAM OLARAK BİR KEZ ateşlenir"
+      - id: AC-3
+        given: "Terminal (completed/rejected/cancelled) bir instance"
+        when: "Geciken bir event, API çağrısı veya timer onu ilerletmeye çalıştığında"
+        then: "Kontrollü şekilde reddedilir; yeni node execution OLUŞMAZ"
+      - id: AC-4
+        given: "Tenant A'nın actor'ü ve Tenant B'nin instance ID'si"
+        when: "Okuma/iptal/karar/timeline/dosya erişimi denendiğinde"
+        then: "5/5 reddedilir; uygulama filtresi kaldırılsa bile RLS boş döndürür"
+      - id: AC-5
+        given: "Commit'ten hemen önce hata enjekte edildiğinde"
+        when: "Transaction geri alındığında"
+        then: "Ne karar, ne state, ne outbox, ne audit yazılır — HİÇBİRİ"
+    domain_rules:
+      - "Timer veritabanında tutulur; in-memory timer YASAK"
+      - "Terminal instance yeni node başlatamaz (PRD §36.1/5)"
+      - "Audit, business transaction başarısızsa yazılmaz (PRD §36.1/13)"
+    security_requirements:
+      - "Worker BYPASSRLS kullanmaz — en sinsi sızıntı yolu budur"
+    audit_requirements:
+      - "Atomiklik kanıtı: rollback sonrası audit_events BOŞ"
+    observability_requirements:
+      - "Timer gecikme metriği; worker lag metriği"
+    api_impact: none
+    data_model_impact: "timers, outbox_events, processed_events, audit_events"
+    test_cases:
+      - "SPK-07: SIGKILL + restart → süreç tamamlanır (kayıpsız, duplicate'siz)"
+      - "SPK-08: timer restart'tan sağ çıkar, tek kez ateşlenir"
+      - "SPK-09: terminal instance üç yoldan da (API/event/timer) ilerletilemez"
+      - "SPK-10: cross-tenant 5/5 reddedilir + RLS tek başına çalışır + worker RLS'e tabi"
+      - "SPK-11: fault injection → dört tablo da boş"
+    edge_cases:
+      - "Event 'işleniyor' işaretlenip crash → lease/visibility timeout ile geri alınmalı"
+      - "İki worker aynı timer'ı ateşlemeye çalışırsa (lease)"
+      - "Outbox event'inin after_commit hook'unda yazılması = DUAL WRITE (yanlış implementasyon)"
+    dependencies: [FP-E08-003]
+    definition_of_done:
+      - "SPK-07..SPK-11 kanıt paketiyle geçti"
+      - "12/12 kriter tamamlandı → spike raporu ve ADR-004 güncellemesi üretildi"
+      - "12/12 sağlanamadıysa Temporal ADR'si açıldı"
+    complexity: L
+    status: draft
+
+  # ==========================================================================
+  # E09 — Workflow Runtime Core   (E08 12/12 geçmeden BAŞLAMAZ)
+  # ==========================================================================
+
+  - id: FP-E09-001
+    title: WorkflowRuntimePort sözleşmesi
+    epic_id: E09
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, uygulamanın somut runtime'ı bilmemesini istiyorum; böylece
+      spike başarısız olursa Temporal'a geçiş domain kodunu yeniden yazmadan mümkün olsun.
+    business_value: "Runtime kararının geri döndürülebilir kalması."
+    scope:
+      - "WorkflowRuntimePort: startInstance, signalApprovalDecision, completeTask, cancelInstance, getInstanceState"
+      - Port'un domain tipleriyle konuşması (runtime tiplerinin domain'e sızmaması)
+      - Fake in-memory adapter (unit test için)
+    out_of_scope:
+      - Somut runtime implementasyonu (FP-E09-002..005)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Uygulama katmanı workflow ilerletmek istediğinde"
+        when: "Runtime çağrıldığında"
+        then: "Yalnız port sözleşmesine bağımlıdır; somut runtime sınıfına DOĞRUDAN bağımlılık yoktur"
+      - id: AC-2
+        given: "Fake ve gerçek runtime adapter'ı"
+        when: "Contract test seti çalıştırıldığında"
+        then: "İkisi de aynı seti geçer"
+    domain_rules:
+      - "Provider/runtime tipleri domain'e sızamaz"
+    security_requirements:
+      - "Port çağrıları tenant context taşır"
+    audit_requirements: []
+    observability_requirements:
+      - "Port çağrıları trace edilir"
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "contract: fake ve gerçek adapter aynı contract testini geçer"
+      - "fitness: uygulama katmanı somut runtime'ı import etmiyor"
+    edge_cases:
+      - "Port'un çok 'ince' olması → runtime detayı uygulamaya sızar"
+      - "Port'un çok 'kalın' olması → Temporal'a geçiş imkânsızlaşır"
+    dependencies: [FP-E08-004]
+    definition_of_done:
+      - "Contract test seti tamam"
+      - "Fitness check aktif"
+    complexity: M
+    status: blocked          # E08 (12/12) geçmeden başlamaz
+
+  - id: FP-E09-002
+    title: Instance başlatma ve version binding
+    epic_id: E09
+    persona: requester
+    user_story: >
+      Bir talep sahibi olarak, talebimi gönderdiğimde sürecin o anki yayınlanmış kurallarla
+      başlamasını istiyorum; böylece kurallar sonradan değişse bile talebim tutarlı ilerlesin.
+    business_value: "Süreç tutarlılığı; kural değişikliğinin devam eden talepleri bozmaması."
+    scope:
+      - "startInstance: published version + form snapshot ile ATOMİK başlangıç"
+      - "Instance state machine: pending → running → waiting → completed/rejected/cancelled"
+      - Instance'ın workflow_version_id'ye kalıcı bağlanması
+    out_of_scope:
+      - suspend/resume (MVP dışı)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir talep gönderildiğinde"
+        when: "Instance başlatıldığında"
+        then: "Talep + form snapshot + instance + ilk outbox event TEK transaction'da yazılır"
+      - id: AC-2
+        given: "Instance başladıktan sonra workflow yeniden yayınlandığında"
+        when: "Instance ilerlediğinde"
+        then: "Başladığı version ile ilerler (SPK-02)"
+      - id: AC-3
+        given: "Bir instance başlatılırken hata oluştuğunda"
+        when: "Transaction geri alındığında"
+        then: "Talep de oluşmaz (kullanıcıya yanlış başarı dönülmez)"
+    domain_rules:
+      - "Her instance TAM OLARAK BİR published version'a bağlıdır (PRD §36.1/4)"
+      - "Runtime, definition'ı instance'ın bağlı olduğu version'dan okur"
+    security_requirements:
+      - "Instance tenant-scoped; cross-tenant başlatma reddedilir"
+    audit_requirements:
+      - "workflow.instance.started.v1 — instance_id, workflow_version_id, started_by"
+    observability_requirements:
+      - "workflow_instance_started_total; instance start latency (hedef < 5 s)"
+    api_impact: "POST /v1/workflows/{id}/instances (dahili; talep API'si üzerinden tetiklenir)"
+    data_model_impact: "workflow_instances (id, tenant_id, workflow_version_id, status, current_node_id, version); node_executions; RLS"
+    test_cases:
+      - "integration: talep + instance + outbox atomik"
+      - "integration: version binding (SPK-02)"
+      - "security: cross-tenant instance başlatma reddedilir"
+    edge_cases:
+      - "Yayınlanmış version yokken talep gönderilirse"
+      - "Deprecated version ile yeni instance başlatılamaz"
+    dependencies: [FP-E09-001]
+    definition_of_done:
+      - "Atomiklik ve version binding testleri geçiyor"
+    complexity: M
+    status: blocked
+
+  - id: FP-E09-003
+    title: Condition node — güvenli ve deterministik evaluator
+    epic_id: E09
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, "10.000 TL üzeri talepler finansa, 50.000 TL üzeri talepler
+      genel müdüre de gitsin" kuralını kod yazmadan tanımlamak istiyorum; ve çalışan olarak
+      neden o kişiye gittiğini görmek istiyorum.
+    business_value: >
+      Şeffaf onay motoru — PRD'nin stratejik farklılaştırıcılarından biri:
+      "Tutar 50.000 TL'den büyük olduğu için Genel Müdür onayı eklendi."
+    scope:
+      - "Güvenli expression DSL: karşılaştırma, mantıksal AND/OR, alan referansı"
+      - Whitelist edilmiş operatörler; tip kontrollü alan referansları
+      - İKİ EŞİKLİ (10.000 ve 50.000 TL) çok dallı koşul desteği
+      - Evaluation timeout ve maksimum karmaşıklık
+      - Karar gerekçesinin açıklanabilir çıktısı
+    out_of_scope:
+      - Kullanıcı tanımlı fonksiyon, script node, DMN
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir koşul ifadesi"
+        when: "Değerlendirildiğinde"
+        then: "eval/exec KULLANILMAZ; parser + whitelist ile deterministik sonuç üretilir"
+      - id: AC-2
+        given: "Aynı girdi iki kez değerlendirildiğinde"
+        when: "Sonuç karşılaştırıldığında"
+        then: "Sonuç AYNIDIR (deterministik)"
+      - id: AC-3
+        given: "Bir talep koşula göre yönlendirildiğinde"
+        when: "Kullanıcı timeline'a baktığında"
+        then: "Yönlendirme gerekçesi insan tarafından okunabilir şekilde görünür"
+      - id: AC-4
+        given: "Hiçbir branch eşleşmediğinde"
+        when: "Değerlendirme bittiğinde"
+        then: "Default branch'e gidilir; instance ASILI KALMAZ"
+      - id: AC-5
+        given: "Üç kademeli eşik yapısı (10.000 / 50.000 TL)"
+        when: "Eşikler değiştirilmek istendiğinde"
+        then: "Yeni workflow version yayınlanır; DOMAIN KODU DEĞİŞMEZ (eşikler hard-code EDİLEMEZ)"
+    domain_rules:
+      - "Kullanıcı koşullarında eval veya dinamik kod çalıştırma YASAK (PRD §9.10, §39)"
+      - "Tutar karşılaştırması minor unit üzerinden yapılır"
+      - "Eşik değerleri (10.000 / 50.000 TL) workflow definition'dan gelir; koda gömülemez (ASM-0001)"
+    security_requirements:
+      - "Zararlı payload parser tarafından reddedilir"
+      - "Evaluation timeout (sonsuz döngü koruması)"
+      - "FF-08: kod tabanında eval/exec yok"
+    audit_requirements:
+      - "workflow.node.completed.v1 — condition sonucu ve seçilen branch"
+    observability_requirements:
+      - "condition_evaluation_total{branch}; evaluation latency"
+    api_impact: none
+    data_model_impact: "node_executions içinde değerlendirme sonucu ve gerekçe"
+    test_cases:
+      - "unit: her iki eşiğin sınır değerleri (9999.99 / 10000.00 / 10000.01 ve 49999.99 / 50000.00 / 50000.01)"
+      - "security: zararlı payload reddedilir"
+      - "unit: determinizm (aynı girdi → aynı çıktı)"
+      - "unit: hiçbir branch eşleşmezse default"
+      - "unit: null/eksik alan → kontrollü hata"
+      - "fitness: eşik değerleri domain kodunda hard-code edilmemiş"
+    edge_cases:
+      - "Farklı para birimi karşılaştırması → domain hatası"
+      - "Çok derin iç içe AND/OR (karmaşıklık sınırı)"
+      - "Alan tipi uyuşmazlığı (string vs number)"
+      - "İki eşiğin çakışması/boşluk bırakması (10.000 ≤ x ≤ 50.000 aralığının kapalılığı) — validation'da yakalanmalı"
+    dependencies: [FP-E09-002]
+    definition_of_done:
+      - "Güvenlik ve determinizm testleri geçiyor"
+      - "Her iki eşiğin sınır değerleri testli"
+      - "Gerekçe açıklaması timeline'da görünüyor"
+      - "FF-08 aktif"
+    complexity: M
+    status: blocked
+
+  - id: FP-E09-004
+    title: Transactional outbox ve PostgreSQL polling worker
+    epic_id: E09
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, bir onay kaydedildiğinde bunun yan etkilerinin ASLA kaybolmamasını
+      istiyorum; böylece "onay verildi ama süreç ilerlemedi" durumu oluşmasın.
+    business_value: >
+      Ürünün "talepler kaybolmaz" vaadi. Dual write, sessizce asılı kalan süreçler üretir.
+    scope:
+      - outbox_events tablosu; business state ile AYNI transaction'da yazım
+      - Polling worker (FOR UPDATE SKIP LOCKED) + lease/visibility timeout
+      - Bounded retry (exponential backoff + jitter) + dead-letter/incident
+      - Outbox retention/temizleme job'ı
+    out_of_scope:
+      - Harici broker (Redis/RabbitMQ/Kafka)
+      - Webhook/dış entegrasyon teslimi
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir business state değişikliği olduğunda"
+        when: "Outbox event'i yazıldığında"
+        then: "İkisi AYNI transaction'dadır; commit olmazsa event de yoktur (dual write YOK)"
+      - id: AC-2
+        given: "Worker bir event'i işlerken çöktüğünde"
+        when: "Worker yeniden başladığında"
+        then: "Event lease süresi dolduğunda tekrar alınır ve işlenir; KAYBOLMAZ"
+      - id: AC-3
+        given: "Bir event kalıcı olarak başarısız olduğunda"
+        when: "Maksimum attempt aşıldığında"
+        then: "Dead-letter/incident'a düşer; SONSUZ RETRY YAPILMAZ"
+      - id: AC-4
+        given: "İki worker aynı anda çalıştığında"
+        when: "Aynı event'i almaya çalıştıklarında"
+        then: "SKIP LOCKED ile yalnız biri işler"
+    domain_rules:
+      - "Dual write YASAK (ADR-007)"
+      - "at-least-once + idempotent consumer; 'exactly once' iddiası YASAK"
+      - "Event tipi versiyonludur (approval.decided.v1)"
+    security_requirements:
+      - "Event payload'ı tenant_id taşır; worker RLS'e tabidir"
+      - "Hassas veri event payload'ında gereksiz taşınmaz"
+    audit_requirements: []
+    observability_requirements:
+      - "outbox_pending_count, outbox_dispatch_latency, worker_lag, retry_count, dead_letter_total"
+      - "Queue lag ve timer lag alarmı"
+    api_impact: none
+    data_model_impact: "outbox_events (id, tenant_id, type, payload JSONB, correlation_id, status, attempts, locked_until, created_at, processed_at)"
+    test_cases:
+      - "integration: state + outbox atomik (rollback → ikisi de yok)"
+      - "resilience: worker kill → event kaybolmaz (SPK-07)"
+      - "integration: bounded retry; maksimum attempt sonrası dead-letter"
+      - "integration: iki worker aynı event'i iki kez almaz"
+    edge_cases:
+      - "Lease süresi işlemeden kısa olursa → duplicate dispatch (idempotent inbox bunu karşılar)"
+      - "Outbox tablosunun şişmesi → retention job"
+      - "Handler'ın çok uzun sürmesi (timeout)"
+    dependencies: [FP-E09-002]
+    definition_of_done:
+      - "Atomiklik ve dayanıklılık testleri geçiyor"
+      - "Bounded retry kanıtlı"
+      - "Retention job tanımlı"
+    complexity: L
+    status: blocked
+
+  - id: FP-E09-005
+    title: Idempotent inbox, terminal guard ve optimistic concurrency
+    epic_id: E09
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, aynı event iki kez işlense bile çift bildirim/çift task
+      oluşmamasını ve tamamlanmış bir sürecin "dirilmemesini" istiyorum.
+    business_value: "Duplicate side effect, kullanıcı güvenini doğrudan kıran görünür bir hatadır."
+    scope:
+      - processed_events (idempotent inbox); side effect ile AYNI transaction'da işaretleme
+      - Terminal state guard (API, event handler ve timer yollarının HEPSİNDE)
+      - Optimistic concurrency (version alanı, 409/412)
+      - Persisted timer (restart-safe, lease'li)
+    out_of_scope:
+      - SLA/eskalasyon zinciri (MVP dışı)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Aynı event iki kez işlendiğinde"
+        when: "İkincisi çalıştığında"
+        then: "Hiçbir yeni side effect oluşmaz (SPK-06)"
+      - id: AC-2
+        given: "Terminal bir instance"
+        when: "Geciken event, API çağrısı veya timer onu ilerletmeye çalıştığında"
+        then: "Kontrollü domain hatası; yeni node execution OLUŞMAZ (SPK-09)"
+      - id: AC-3
+        given: "Bir instance iptal edildiğinde"
+        when: "İptal işlendiğinde"
+        then: "Açık task, approval step ve timer'lar cancelled olarak kapatılır"
+      - id: AC-4
+        given: "Eşzamanlı iki yazma"
+        when: "İkisi de commit etmeye çalıştığında"
+        then: "Biri 409/412 alır; sessiz overwrite yok (SPK-12)"
+    domain_rules:
+      - "Terminal instance yeni node başlatamaz"
+      - "Terminal task yeniden tamamlanamaz"
+      - "Idempotency işareti side effect ile AYNI transaction'da yazılır"
+    security_requirements:
+      - "Guard'lar API katmanında DEĞİL, domain katmanında; event handler arka kapıyı açamaz"
+    audit_requirements:
+      - "İptal edilen child resource'lar audit'e yazılır"
+    observability_requirements:
+      - "duplicate_event_suppressed_total; terminal_guard_rejection_total; concurrency_conflict_total"
+    api_impact: "409/412 hata sözleşmesi"
+    data_model_impact: "processed_events (event_id PK, handler, processed_at); timers (id, tenant_id, instance_id, fire_at, locked_until, status)"
+    test_cases:
+      - "integration: duplicate event → tek side effect"
+      - "integration: terminal instance üç yoldan da ilerletilemez"
+      - "integration: cancel → açık child resource'lar kapanır"
+      - "resilience: timer restart sonrası tek kez ateşlenir"
+      - "integration: eşzamanlı yazma → 409"
+    edge_cases:
+      - "Idempotency kaydının side effect'ten SONRA yazılması (crash → duplicate)"
+      - "Timer'ın iki worker tarafından ateşlenmesi (lease)"
+      - "İptal sırasında eşzamanlı onay kararı gelmesi"
+    dependencies: [FP-E09-004]
+    definition_of_done:
+      - "SPK-06, SPK-08, SPK-09, SPK-12 davranışları üretimde de testli"
+      - "FF-07 (handler idempotency) aktif"
+    complexity: L
+    status: blocked
+
+  # ==========================================================================
+  # E10 — Sequential Approval
+  # ==========================================================================
+
+  - id: FP-E10-001
+    title: ApprovalRequest / Step / Decision domain modeli
+    epic_id: E10
+    persona: approver
+    user_story: >
+      Bir onaycı olarak, bana düşen onay adımını ve talebin tüm bağlamını görmek istiyorum;
+      ve verdiğim kararın sonradan değiştirilemeyeceğinden emin olmak istiyorum.
+    business_value: "Onay motoru ürünün çekirdek değeridir. Karar immutable değilse audit anlamsızdır."
+    scope:
+      - ApprovalRequest (node başına), ApprovalStep (sıradaki adım), ApprovalDecision (immutable karar)
+      - "Step state machine: pending → active → approved | rejected | changes_requested | cancelled"
+      - "Onaycı çözümleme: belirli kullanıcı veya rol"
+    out_of_scope:
+      - Parallel approval, quorum, delegation, yedek onaycı, eskalasyon (KAPSAM DIŞI)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir onay kararı verildiğinde"
+        when: "Kayıt yazıldığında"
+        then: "Karar IMMUTABLE'dır: karar veren, tarih, gerekçe ve hangi form snapshot'ına verildiği değiştirilemez"
+      - id: AC-2
+        given: "Bir approval step aktif olduğunda"
+        when: "Onaycı çözümlendiğinde"
+        then: "Yalnız o adıma atanmış kullanıcı/rol karar verebilir"
+      - id: AC-3
+        given: "Terminal bir step"
+        when: "Yeni karar verilmeye çalışıldığında"
+        then: "Reddedilir"
+    domain_rules:
+      - "ApprovalRequest ≠ ApprovalStep ≠ ApprovalDecision (PRD §34)"
+      - "Karar veren actor'ün KARAR ANINDA yetkili olduğu kanıtlanır"
+      - "Kullanıcı başkasının hesabıyla onay tamamlayamaz"
+    security_requirements:
+      - "approval.decide permission'ı + step ownership kontrolü"
+      - "Yetkisiz karar denemesi 403 + audit"
+    audit_requirements:
+      - "approval.decided.v1 — actor, step_id, karar, gerekçe, snapshot hash, karar anındaki rol"
+    observability_requirements:
+      - "approval_decision_total{decision}; approval wait time"
+    api_impact: "GET /v1/approvals; POST /v1/approval-steps/{stepId}/decisions"
+    data_model_impact: "approval_requests, approval_steps (step_no, status, assignee_role/user, version), approval_decisions (append-only); RLS"
+    test_cases:
+      - "integration: karar immutable"
+      - "security: atanmamış kullanıcı karar veremez"
+      - "security: cross-tenant step'e karar verilemez"
+      - "unit: step state machine geçişleri"
+    edge_cases:
+      - "Onaycının rolü karar anında değişmişse"
+      - "Onaycının membership'i suspend edilmişse"
+      - "Role atanmış step'te birden fazla kişi yetkiliyse (ilk karar veren kazanır — deterministik)"
+    dependencies: [FP-E09-005, FP-E03-003]
+    definition_of_done:
+      - "Immutability ve ownership testleri geçiyor"
+      - "Audit kaydı karar anındaki yetkiyi içeriyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E10-002
+    title: Sıralı adım aktivasyonu (1-3 adımlı zincir)
+    epic_id: E10
+    persona: approver
+    user_story: >
+      Bir finans yöneticisi olarak, ekip yöneticisi onaylamadan bana onay düşmemesini istiyorum;
+      ve genel müdür olarak bana yalnız 50.000 TL üzeri talepler düşsün istiyorum.
+      Onay zinciri gerçekten sıralı işlemelidir.
+    business_value: "Sıralı onay, satın alma sürecinin iş kuralıdır. Sıra atlanırsa kontrol kaybolur."
+    scope:
+      - "Zincir uzunluğu CONFIG'ten gelir: 1, 2 veya 3 adım (ASM-0001 eşiklerine göre)"
+      - Sonraki step, önceki approved olmadan pending kalır
+      - Onay sonrası sonraki step ATOMİK olarak aktifleşir
+      - Tüm step'ler approved → instance ilerler
+    out_of_scope:
+      - Parallel/quorum onay
+      - 3'ten fazla adım (mevcut eşik yapısı 3 kademe)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Çok adımlı sıralı onay aktifken"
+        when: "Bir onaycı onay verdiğinde"
+        then: "SONRAKİ step AKTİF olur ve workflow henüz TAMAMLANMAZ (instance waiting)"
+      - id: AC-2
+        given: "Önceki step aktifken"
+        when: "Sonraki adımın onaycısı doğrudan karar vermeye çalıştığında"
+        then: "403/409 ile reddedilir ve HİÇBİR karar kaydı oluşmaz"
+      - id: AC-3
+        given: "SON step onaylandığında"
+        when: "Workflow ilerlediğinde"
+        then: "Instance completed olur ve talep approved durumuna geçer"
+      - id: AC-4
+        given: "Bir onay verildiğinde"
+        when: "Sonraki step aktivasyonu yazıldığında"
+        then: "Karar + step aktivasyonu + outbox + audit AYNI transaction'dadır (step asılı kalmaz)"
+      - id: AC-5
+        given: "Farklı tutarlarda talepler (5.000 / 25.000 / 75.000 TL)"
+        when: "Onay zinciri kurulduğunda"
+        then: "Sırasıyla 1, 2 ve 3 adımlı zincir oluşur; adım sayısı KODA GÖMÜLÜ DEĞİL, config'ten gelir"
+    domain_rules:
+      - "Bir step tamamlanmadan sonraki AKTİF OLMAZ (SPK-04)"
+      - "Sonraki step aktivasyonu transaction dışında yapılamaz — aksi hâlde süreç sessizce asılı kalır"
+      - "Zincir uzunluğu Sequential Approval node config'inden okunur; 1-3 adım desteklenir (ASM-0001)"
+    security_requirements:
+      - "Erken karar denemesi audit'e yazılır"
+      - "Her adımın onaycısı yalnız KENDİ adımına karar verebilir"
+    audit_requirements:
+      - "workflow.node.entered / completed; approval step aktivasyonu"
+    observability_requirements:
+      - "approval_step_activated_total{step_no}; adım bazında bekleme süresi"
+    api_impact: none
+    data_model_impact: "approval_steps.step_no + status; unique(approval_request_id, step_no)"
+    test_cases:
+      - "integration: erken karar reddedilir (SPK-04)"
+      - "integration: 3 adımlı zincirde 1. onay → 2. step aktif, 3. hâlâ pending"
+      - "integration: son onay → instance completed"
+      - "integration: aktivasyon ile karar aynı transaction'da (fault injection ile kanıt)"
+      - "integration: 5.000 / 25.000 / 75.000 TL → 1 / 2 / 3 adımlı zincir"
+      - "fitness: adım sayısı domain kodunda hard-code edilmemiş"
+    edge_cases:
+      - "Tek adımlı onay zinciri (< 10.000 TL yolu)"
+      - "İlk step reddedilirse sonrakiler hiç aktifleşmez"
+      - "3. adımın onaycısı (genel müdür) yoksa → kontrollü hata/incident; süreç asılı kalmaz"
+      - "Aktivasyon event'i duplicate işlenirse (idempotent)"
+    dependencies: [FP-E10-001]
+    definition_of_done:
+      - "Sıra atlanamıyor VE sıra asılı kalmıyor (iki yönlü test)"
+      - "1, 2 ve 3 adımlı zincirler testli"
+      - "Adım sayısı config'ten geliyor (hard-code değil)"
+    complexity: M
+    status: draft
+
+  - id: FP-E10-003
+    title: Approve / Reject / Changes requested kararları
+    epic_id: E10
+    persona: approver
+    user_story: >
+      Bir onaycı olarak, onaylamanın yanında reddetme ve değişiklik isteme seçeneklerine
+      sahip olmak istiyorum; böylece eksik bir talebi reddetmek zorunda kalmayayım.
+    business_value: "Gerçek onay süreçleri 'onayla/reddet' ikilisinden ibaret değildir (PRD §9.9)."
+    scope:
+      - approved → sonraki step veya instance completed
+      - rejected → instance rejected (terminal); gerekçe ZORUNLU
+      - changes_requested → requester'a düzenleme görevi; talep changes_requested durumuna geçer
+      - Revizyon sonrası yeniden onaya gönderme (yeni snapshot, onay zinciri baştan)
+    out_of_scope:
+      - Kısmi revizyon (yalnız belirli alanların açılması ince ayarı sonraki faz)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir onaycı reddettiğinde"
+        when: "Gerekçe girilmediğinde"
+        then: "Reddedilir — ret gerekçesi zorunludur"
+      - id: AC-2
+        given: "Bir onaycı değişiklik istediğinde"
+        when: "Karar işlendiğinde"
+        then: "Requester'a düzenleme görevi oluşur; talep changes_requested olur; bekleyen diğer step'ler beklemede kalır"
+      - id: AC-3
+        given: "Talep revize edilip yeniden gönderildiğinde"
+        when: "Yeni snapshot oluştuğunda"
+        then: "Onay zinciri yeniden değerlendirilir (tutar değiştiyse koşul yeniden çalışır) ve ÖNCEKİ onaylar geçersiz olur"
+      - id: AC-4
+        given: "Bir talep reddedildiğinde"
+        when: "Instance terminal olduğunda"
+        then: "Yeni node başlatılamaz; açık task/timer'lar kapatılır"
+    domain_rules:
+      - "Onay sonrasında kritik form alanı değişirse önceki onay GEÇERSİZ olur (PRD §9.9)"
+      - "Değişiklik talebi, talep sahibine düzenleme görevi oluşturur"
+      - "rejected terminaldir"
+    security_requirements:
+      - "Yalnız aktif step'in yetkili onaycısı karar verebilir"
+      - "Requester yalnız kendisine açılan alanları düzenleyebilir"
+    audit_requirements:
+      - "approval.decided.v1 (approved|rejected|changes_requested) — gerekçe dahil"
+      - "Revizyon sonrası önceki onayların geçersiz kılınması audit'e yazılır"
+    observability_requirements:
+      - "approval_decision_total{decision}; rework/revizyon oranı"
+    api_impact: "POST /v1/approval-steps/{stepId}/decisions {decision, reason}"
+    data_model_impact: "approval_decisions.reason NOT NULL (rejected/changes_requested için)"
+    test_cases:
+      - "integration: gerekçesiz ret reddedilir"
+      - "integration: changes_requested → requester'a task"
+      - "integration: revizyon sonrası tutar değişirse onay zinciri yeniden hesaplanır"
+      - "integration: rejected instance terminal (yeni node yok)"
+      - "security: requester izin verilmeyen alanı düzenleyemez"
+    edge_cases:
+      - "Revizyon sonrası tutar eşiğin altına düşerse (2 adımlı zincir 1 adıma iner)"
+      - "changes_requested sonrası requester hiç yanıt vermezse (talep açık kalır — SLA MVP dışı)"
+      - "Aynı anda hem onay hem değişiklik talebi gelmesi (yarış → tek karar)"
+    dependencies: [FP-E10-002]
+    definition_of_done:
+      - "Üç karar yolu da testli"
+      - "Revizyon sonrası önceki onayın geçersizliği kanıtlandı"
+    complexity: M
+    status: draft
+
+  - id: FP-E10-004
+    title: Duplicate approval ve self-approval koruması
+    epic_id: E10
+    persona: approver
+    user_story: >
+      Bir onaycı olarak, yanlışlıkla iki kez tıkladığımda iki karar oluşmamasını istiyorum;
+      ve bir talep sahibi olarak kendi talebimi onaylayamamalıyım.
+    business_value: >
+      Çift onay ve self-approval, finansal bir süreçte doğrudan kontrol ihlalidir.
+      Bu iki koruma ürünün denetlenebilirlik iddiasının temelidir.
+    scope:
+      - "Duplicate approval koruması: DB-level unique constraint + optimistic lock"
+      - Self-approval engeli (policy açıkken requester kendi adımını onaylayamaz)
+      - Alternate assignee davranışı (requester onaycı ise adım bir üst yetkiliye gider)
+    out_of_scope:
+      - Dört göz prensibi, MFA gerektiren kritik onay
+    acceptance_criteria:
+      - id: AC-1
+        given: "Aynı onaycı aynı step'e EŞZAMANLI iki karar gönderdiğinde (çift tıklama / iki cihaz)"
+        when: "İkisi de işlendiğinde"
+        then: "TEK karar oluşur; tek state transition; tek notification; ikinci istek idempotent sonuç veya 409 alır"
+      - id: AC-2
+        given: "Self-approval politikası açıkken"
+        when: "Requester kendi talebinin onay adımına karar vermeye çalıştığında"
+        then: "Reddedilir; audit'e yazılır"
+      - id: AC-3
+        given: "Requester'ın kendisi onaycı rolündeyken"
+        when: "Onay zinciri kurulduğunda"
+        then: "Adım alternate assignee'ye (üst yetkili) yönlendirilir; süreç asılı KALMAZ"
+    domain_rules:
+      - "Bir approval step için TEK geçerli aktif karar bulunur (PRD §36.1/7)"
+      - "Riskli/finansal süreçlerde 'talep sahibi kendi talebini onaylayamaz' kuralı desteklenir"
+      - "Koruma uygulama seviyesinde 'önce oku, yoksa yaz' ile YAPILAMAZ — DB düzeyinde olmalı"
+    security_requirements:
+      - "Unique constraint: approval_step_id başına tek terminal decision"
+      - "Optimistic lock ile yarış koşulu koruması"
+      - "Idempotency-Key desteği"
+    audit_requirements:
+      - "Duplicate karar denemesi ve self-approval denemesi audit'e yazılır"
+    observability_requirements:
+      - "duplicate_decision_rejected_total; self_approval_blocked_total"
+    api_impact: "409 Conflict sözleşmesi; Idempotency-Key"
+    data_model_impact: "UNIQUE(approval_step_id) WHERE status IN terminal; approval_steps.version"
+    test_cases:
+      - "concurrency: paralel iki istek → approval_decisions satır sayısı = 1 (SPK-05)"
+      - "integration: aynı komut sıralı iki kez → idempotent"
+      - "security: self-approval reddedilir"
+      - "integration: requester onaycı ise alternate assignee'ye gider"
+    edge_cases:
+      - "İki FARKLI onaycının role-atanmış step'e eşzamanlı kararı → tek karar (ilk kazanır)"
+      - "Alternate assignee de yoksa (üst yetkili yok) → kontrollü hata, süreç asılı kalmaz"
+      - "Deadlock riski (kilit sırası tutarlı olmalı)"
+    dependencies: [FP-E10-003]
+    definition_of_done:
+      - "Concurrency testi geçiyor (tek karar)"
+      - "Self-approval engeli testli"
+      - "Alternate assignee yolu testli"
+    complexity: M
+    status: draft
+
+  # ==========================================================================
+  # E11 — Task ve Inbox
+  # ==========================================================================
+
+  - id: FP-E11-001
+    title: Task aggregate ve yaşam döngüsü
+    epic_id: E11
+    persona: requester
+    user_story: >
+      Bir çalışan olarak, benden bir aksiyon beklendiğinde (örn. değişiklik talebi) bunu bir
+      görev olarak görmek istiyorum; böylece ne yapmam gerektiği net olsun.
+    business_value: "İnsan aksiyonu bekleyen işin görünür olması — 'talep kaybolmaz' vaadinin parçası."
+    scope:
+      - "Task aggregate: title, description, instance/node referansı, assignee, status, due_date (opsiyonel)"
+      - "Task state machine: open → in_progress → completed; open|in_progress → cancelled"
+      - is_overdue TÜRETİLMİŞ alan (ayrı state DEĞİL)
+      - Idempotent completion
+    out_of_scope:
+      - Checklist, bağımlılık, etiket, öncelik yönetimi, yorum (MVP'de minimal)
+      - SLA/eskalasyon
+    acceptance_criteria:
+      - id: AC-1
+        given: "Geçersiz bir state transition denendiğinde (örn. completed → in_progress)"
+        when: "Komut işlendiğinde"
+        then: "Reddedilir"
+      - id: AC-2
+        given: "Aynı task completion komutu iki kez gönderildiğinde"
+        when: "İkincisi işlendiğinde"
+        then: "İdempotent sonuç döner; workflow İKİ KEZ ilerlemez"
+      - id: AC-3
+        given: "Instance iptal edildiğinde"
+        when: "Açık task'lar bulunduğunda"
+        then: "Task'lar cancelled olur"
+    domain_rules:
+      - "Terminal task yeniden tamamlanamaz (PRD §36.1/6)"
+      - "overdue ayrı state değil, türetilmiş alandır — aynı kavram iki yerde tutulmaz"
+    security_requirements:
+      - "Kullanıcı yalnız kendisine/rolüne atanmış task'ı tamamlayabilir"
+    audit_requirements:
+      - "task.created / assigned / completed / cancelled"
+    observability_requirements:
+      - "task_completed_total; task bekleme süresi"
+    api_impact: "GET /v1/tasks; POST /v1/tasks/{id}/complete"
+    data_model_impact: "tasks (id, tenant_id, instance_id, node_execution_id, assignee_user_id/role, status, due_at, version); RLS"
+    test_cases:
+      - "unit: state machine geçişleri"
+      - "integration: duplicate completion idempotent"
+      - "security: başkasının task'ı tamamlanamaz"
+      - "security: cross-tenant task okunamaz"
+      - "integration: instance cancel → task cancelled"
+    edge_cases:
+      - "Assignee'nin membership'i suspend olursa"
+      - "Task tamamlanırken instance terminal olursa (yarış)"
+    dependencies: [FP-E09-005, FP-E03-003]
+    definition_of_done:
+      - "State machine ve idempotency testleri geçiyor"
+      - "Cross-tenant test geçiyor"
+    complexity: M
+    status: draft
+
+  - id: FP-E11-002
+    title: Assignee resolution (kullanıcı ve rol)
+    epic_id: E11
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, onayı bir kişiye değil bir role atamak istiyorum; böylece
+      kişi izne çıktığında süreç durmasın.
+    business_value: "Rol bazlı atama, kişiye bağımlılığı kırar (PRD §9.8)."
+    scope:
+      - "Atama stratejileri (ilk dilim): belirli kullanıcı, belirli rol"
+      - Aktif ve yetkili assignee çözümleme (suspended üye atanamaz)
+      - Assignee bulunamazsa kontrollü hata (süreç asılı kalmaz)
+    out_of_scope:
+      - Round-robin, en az iş yükü, requester'ın yöneticisi hiyerarşisi, dinamik expression (sonraki faz)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir role atanmış task/approval step"
+        when: "Assignee çözümlendiğinde"
+        then: "O roldeki AKTİF üyeler yetkilidir; suspended/removed üyeler değildir"
+      - id: AC-2
+        given: "Hiçbir aktif assignee bulunamadığında"
+        when: "Node çalıştırıldığında"
+        then: "Kontrollü hata/incident üretilir; süreç SESSİZCE ASILI KALMAZ"
+    domain_rules:
+      - "Assignee yalnız aynı tenant'ın aktif üyesi olabilir"
+    security_requirements:
+      - "Cross-tenant assignee ataması reddedilir"
+    audit_requirements:
+      - "task.assigned — çözümlenen assignee ve strateji"
+    observability_requirements:
+      - "assignee_resolution_failed_total (alarm)"
+    api_impact: none
+    data_model_impact: "task_assignments veya tasks.assignee_role_id"
+    test_cases:
+      - "integration: role atanmış adımda yalnız aktif üyeler yetkili"
+      - "integration: assignee bulunamazsa incident"
+      - "security: cross-tenant assignee reddedilir"
+    edge_cases:
+      - "Rolde hiç aktif üye kalmaması"
+      - "Rolde tek üye var ve o da requester (self-approval → alternate assignee)"
+    dependencies: [FP-E11-001]
+    definition_of_done:
+      - "Assignee bulunamama senaryosu incident üretiyor (asılı kalmıyor)"
+    complexity: M
+    status: draft
+
+  - id: FP-E11-003
+    title: Kişisel task ve approval inbox'ı
+    epic_id: E11
+    persona: approver
+    user_story: >
+      Bir onaycı olarak, bekleyen onaylarımı tek ekranda görmek istiyorum; böylece
+      e-postada kaybolmasınlar.
+    business_value: "Ürünün ana günlük kullanım yüzeyi. 'Onaylar e-postada dağılmaz' vaadi."
+    scope:
+      - GET /v1/tasks ve GET /v1/approvals — yalnız yetkili kayıtlar
+      - Cursor pagination + server-side max page size
+      - Temel filtreler (durum, tarih) — allowlist'li
+      - "Ekran state'leri: loading, empty, permission-denied, error"
+    out_of_scope:
+      - Saved views, gelişmiş filtre, toplu onay, arama
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir kullanıcı inbox'ını açtığında"
+        when: "Liste döndüğünde"
+        then: "Yalnız kendisine/rolüne atanmış ve yetkili olduğu kayıtlar görünür"
+      - id: AC-2
+        given: "Çok sayıda kayıt olduğunda"
+        when: "Liste istendiğinde"
+        then: "Cursor pagination kullanılır; sınırsız liste DÖNMEZ"
+      - id: AC-3
+        given: "Hiç bekleyen iş yokken"
+        when: "Inbox açıldığında"
+        then: "Empty state gösterilir (happy path dışı state'ler zorunlu)"
+    domain_rules: []
+    security_requirements:
+      - "Liste sorgusu tenant + authorization ile filtrelenir"
+      - "Filter/sort allowlist'lidir (injection koruması)"
+    audit_requirements: []
+    observability_requirements:
+      - "inbox_query_latency (p95 < 400 ms hedefi)"
+    api_impact: "GET /v1/tasks?cursor=&limit=; GET /v1/approvals"
+    data_model_impact: "(tenant_id, assignee, status, created_at) composite index"
+    test_cases:
+      - "security: başkasının task'ları listede görünmez"
+      - "security: cross-tenant kayıt listede görünmez"
+      - "integration: cursor pagination ve max page size"
+      - "frontend: loading/empty/error/permission-denied state'leri"
+    edge_cases:
+      - "Role atanmış kayıt birden fazla kullanıcının inbox'ında görünür (beklenen)"
+      - "Kayıt liste açıkken terminal olursa (stale görünüm → server-confirmed state)"
+    dependencies: [FP-E11-002, FP-E10-001]
+    definition_of_done:
+      - "Yetki filtreleme testli"
+      - "Pagination testli"
+      - "Tüm ekran state'leri implemente"
+    complexity: S
+    status: draft
+
+  # ==========================================================================
+  # E12 — In-App Notification
+  # ==========================================================================
+
+  - id: FP-E12-001
+    title: In-app notification üretimi ve deduplication
+    epic_id: E12
+    persona: approver
+    user_story: >
+      Bir onaycı olarak, bana onay düştüğünde bildirim almak istiyorum; ama aynı olay için
+      iki kez bildirim almak istemiyorum.
+    business_value: "Sürecin ilerlediğinin görünür olması. Duplicate bildirim güveni kırar."
+    scope:
+      - NotificationChannelPort — KANAL-NÖTR port tasarımı (zorunlu; e-posta sonradan adapter olarak eklenecek)
+      - Notification modeli (tenant-scoped, recipient, type, payload, read_at)
+      - Outbox event consumer (approval.requested, approval.decided, task.created)
+      - "Deduplication: aynı business event + recipient + kanal → tek bildirim"
+      - MVP'de yalnız in-app adapter uygulanır
+    out_of_scope:
+      - E-posta adapter'ı → PILOT-READY kapsamında (ASM-0010). Port MVP'de hazır olmalı
+      - Slack, push, SMS
+      - Digest, kullanıcı tercihleri, unsubscribe
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir onay adımı aktifleştiğinde"
+        when: "Outbox event işlendiğinde"
+        then: "Yetkili onaycıya in-app bildirim oluşur"
+      - id: AC-2
+        given: "Aynı outbox event iki kez işlendiğinde"
+        when: "Consumer çalıştığında"
+        then: "TEK bildirim oluşur (idempotent inbox + dedup key)"
+      - id: AC-3
+        given: "Bir bildirim oluşturulduğunda"
+        when: "Kullanıcı listelediğinde"
+        then: "Yalnız kendi tenant'ının ve kendisine ait bildirimleri görür"
+    domain_rules:
+      - "Aynı olay için duplicate bildirim önlenir (PRD §9.12)"
+      - "Notification modülü diğer modüllerin tablolarını OKUMAZ; event payload'ından beslenir"
+      - "NotificationChannelPort kanal-nötrdür: e-posta/Slack eklemek yeni bir ADAPTER olmalı, domain veya port değişikliği DEĞİL"
+    security_requirements:
+      - "Bildirim payload'ında gereksiz hassas veri taşınmaz"
+      - "Cross-tenant bildirim erişimi reddedilir"
+    audit_requirements:
+      - "notification.requested / created"
+    observability_requirements:
+      - "notification_created_total; notification_duplicate_suppressed_total"
+      - "Bildirim enqueue latency (hedef < 5 s)"
+    api_impact: "GET /v1/notifications; POST /v1/notifications/{id}/read"
+    data_model_impact: "notifications (id, tenant_id, recipient_user_id, type, payload JSONB, dedup_key, read_at); UNIQUE(dedup_key); RLS"
+    test_cases:
+      - "integration: duplicate event → tek bildirim"
+      - "security: cross-tenant bildirim okunamaz"
+      - "integration: onay aktifleşince doğru alıcıya bildirim"
+      - "fitness: notification modülü approval tablolarını import etmiyor"
+      - "contract: NotificationChannelPort'a ikinci bir (fake e-posta) adapter eklendiğinde domain kodu DEĞİŞMİYOR"
+    edge_cases:
+      - "Role atanmış step → roldeki tüm aktif üyelere bildirim"
+      - "Alıcının membership'i suspend olduysa bildirim üretilmemeli"
+      - "Aynı kullanıcıya farklı olaylardan aynı anda bildirim (dedup key doğru olmalı)"
+    dependencies: [FP-E09-005]
+    definition_of_done:
+      - "Dedup testi geçiyor"
+      - "Modül bağımsızlığı fitness check ile kanıtlı"
+    complexity: M
+    status: draft
+
+  - id: FP-E12-002
+    title: Bildirim listesi ve read/unread
+    epic_id: E12
+    persona: approver
+    user_story: >
+      Bir kullanıcı olarak, okunmamış bildirimlerimi görmek ve bildirime tıklayarak ilgili
+      talebe gitmek istiyorum.
+    business_value: "Bildirim aksiyona dönüşmezse değeri yoktur."
+    scope:
+      - Bildirim listesi (cursor pagination), okunmamış sayacı
+      - Read/unread işaretleme
+      - Deep link (ilgili instance/talep sayfasına)
+      - Ekran state'leri
+    out_of_scope:
+      - Bildirim tercihleri, digest
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir bildirime tıklandığında"
+        when: "Deep link açıldığında"
+        then: "İlgili talep/instance sayfasına gidilir ve yetki kontrolü YİNE uygulanır"
+      - id: AC-2
+        given: "Bildirim okundu işaretlendiğinde"
+        when: "Komut iki kez gönderildiğinde"
+        then: "İdempotenttir"
+    domain_rules: []
+    security_requirements:
+      - "Deep link, yetkiyi bypass etmez — hedef sayfada authorization yeniden çalışır"
+    audit_requirements: []
+    observability_requirements: []
+    api_impact: "GET /v1/notifications?unread=true"
+    data_model_impact: "notifications.read_at"
+    test_cases:
+      - "security: deep link ile yetkisiz kaynağa erişilemez"
+      - "integration: read işaretleme idempotent"
+      - "frontend: loading/empty/error state'leri"
+    edge_cases:
+      - "Bildirimin işaret ettiği kaynak silinmiş/terminal ise"
+    dependencies: [FP-E12-001]
+    definition_of_done:
+      - "Deep link yetki testi geçiyor"
+      - "Ekran state'leri tamam"
+    complexity: S
+    status: draft
+
+  # ==========================================================================
+  # E13 — Audit Log ve Timeline
+  # ==========================================================================
+
+  - id: FP-E13-001
+    title: Append-only audit servisi
+    epic_id: E13
+    persona: org_admin
+    user_story: >
+      Bir organizasyon yöneticisi olarak, kimin ne zaman hangi kararı verdiğini KANITLAYABİLMEK
+      istiyorum; böylece bir anlaşmazlıkta kayıtlara güvenebileyim.
+    business_value: >
+      Audit log FlowPilot'ın ÜRÜN BİLEŞENİDİR, teknik bir ek değil. "Kim onayladı?" sorusuna
+      kanıtla cevap veremeyen bir onay ürünü değersizdir.
+    scope:
+      - audit_events tablosu (append-only)
+      - "Zorunlu alanlar: event_id, tenant_id, actor_type, actor_id, action, resource_type, resource_id, timestamp(UTC), request_id, metadata, reason"
+      - Business transaction ile AYNI transaction'da yazım
+      - Read-only sorgu API'si
+      - Correction event pattern (update/delete YOK)
+    out_of_scope:
+      - Audit export, retention job, hash chain / bütünlük mührü (sonraki faz)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir business transaction başarısız olduğunda"
+        when: "Rollback gerçekleştiğinde"
+        then: "Audit kaydı YAZILMAZ (başarısız işlem başarılı gibi görünmez)"
+      - id: AC-2
+        given: "Bir audit kaydı yazıldıktan sonra"
+        when: "Değiştirilmeye veya silinmeye çalışıldığında"
+        then: "Engellenir; düzeltme gerekiyorsa correction event yazılır"
+      - id: AC-3
+        given: "audit.read permission'ı olmayan bir kullanıcı"
+        when: "Audit sorguladığında"
+        then: "403 alır"
+    domain_rules:
+      - "Audit append-only (PRD §38.12)"
+      - "Audit application log'un yerine geçmez; application log da audit'in yerine geçmez"
+      - "Audit event business transaction ile atomiktir (PRD §36.1/13)"
+    security_requirements:
+      - "Hassas değerlerin tamamı audit'e yazılmaz (maskeleme/hash)"
+      - "Audit tablosuna UPDATE/DELETE kod yolu yok"
+    audit_requirements:
+      - "Audit'in kendisi bu story'nin konusudur"
+    observability_requirements:
+      - "audit_event_written_total{action}"
+    api_impact: "GET /v1/audit-events (cursor pagination, yetki kontrollü)"
+    data_model_impact: "audit_events (append-only, RLS, (tenant_id, timestamp) index)"
+    test_cases:
+      - "integration: rollback → audit yazılmaz (SPK-11)"
+      - "integration: audit update/delete engellenir"
+      - "security: audit.read yetkisi olmayan okuyamaz"
+      - "security: cross-tenant audit okunamaz"
+      - "fitness: audit tablosuna UPDATE/DELETE yok"
+    edge_cases:
+      - "Audit yazımı başarısız olursa business transaction da başarısız olmalı (audit opsiyonel değil)"
+      - "Çok büyük metadata (boyut sınırı)"
+    dependencies: [FP-E09-005]
+    definition_of_done:
+      - "Atomiklik testi geçiyor"
+      - "Append-only kanıtlandı"
+    complexity: M
+    status: draft
+
+  - id: FP-E13-002
+    title: Kritik aksiyon audit kapsamı
+    epic_id: E13
+    persona: org_admin
+    user_story: >
+      Bir yönetici olarak, kritik işlemlerin HİÇBİRİNİN audit dışında kalmadığından emin
+      olmak istiyorum.
+    business_value: "Eksik audit, olmayan audit kadar risklidir (PRD §27: 'Audit log'un eksik kalması')."
+    scope:
+      - "İlk dilim kritik aksiyon katalogu — login ve başarısız login"
+      - "Membership ve rol değişimi"
+      - "Workflow publish"
+      - "Workflow instance start"
+      - "Talep oluşturma"
+      - "Onay kararı (approved / rejected / changes_requested)"
+      - "Form verisi değişikliği (revizyon)"
+      - "Dosya yükleme ve indirme"
+      - "Yetki reddi (security.authorization.denied)"
+      - "Her aksiyonun audit kapsamında olduğunu doğrulayan parametrik test"
+    out_of_scope:
+      - MVP dışı aksiyonlar (AI, webhook, export, impersonation)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Katalogdaki her kritik aksiyon"
+        when: "Gerçekleştiğinde"
+        then: "Audit kaydı oluşur ve actor/kaynak/zaman içerir"
+      - id: AC-2
+        given: "Yeni bir kritik aksiyon eklendiğinde"
+        when: "Audit kapsamına alınmadığında"
+        then: "Story done sayılamaz"
+    domain_rules: []
+    security_requirements:
+      - "Yetki reddi (security.authorization.denied) mutlaka audit'te"
+    audit_requirements:
+      - "Katalogdaki tüm aksiyonlar"
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "integration: her kritik aksiyon için audit kaydı doğrulanır (parametrik test)"
+    edge_cases:
+      - "Sistem/worker actor'ünün ürettiği aksiyonlar (actor_type=system)"
+    dependencies: [FP-E13-001]
+    definition_of_done:
+      - "Katalogdaki her aksiyon parametrik testle doğrulandı"
+    complexity: S
+    status: draft
+
+  - id: FP-E13-003
+    title: Instance timeline görünümü
+    epic_id: E13
+    persona: requester
+    user_story: >
+      Bir talep sahibi olarak, talebimin hangi aşamada olduğunu, kimin ne zaman ne karar
+      verdiğini ve şu an kimin aksiyonu beklendiğini görmek istiyorum.
+    business_value: >
+      "Talebin durumunu öğrenmek için ne yapıyorsunuz?" — PRD'nin temel problem sorusu.
+      Timeline bu sorunun cevabıdır.
+    scope:
+      - "Instance timeline: node giriş/çıkış, onay kararları, koşul gerekçesi, bildirimler"
+      - Human action / system action AYRIMI
+      - Şu an kimin aksiyonu bekleniyor göstergesi
+      - Yetki kontrollü görünüm
+    out_of_scope:
+      - AI özet, teknik/operasyon timeline'ı (internal admin), yorum/mention
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir talep koşula göre yönlendirildiğinde"
+        when: "Timeline görüntülendiğinde"
+        then: "Yönlendirme gerekçesi okunabilir şekilde görünür (ör. 'Tutar 10.000 TL üzerinde olduğu için finans onayı eklendi')"
+      - id: AC-2
+        given: "Timeline görüntülendiğinde"
+        when: "Kayıtlar listelendiğinde"
+        then: "İnsan aksiyonları ile sistem aksiyonları AYRIŞIR"
+      - id: AC-3
+        given: "Yetkisiz bir kullanıcı"
+        when: "Başkasının talebinin timeline'ını istediğinde"
+        then: "Reddedilir"
+    domain_rules:
+      - "Timeline audit ve domain event'lerden türetilir; ayrı bir 'gerçek' kaynak oluşturmaz"
+    security_requirements:
+      - "Timeline yetki kontrollüdür; hassas alanlar maskelenebilir"
+      - "Cross-tenant timeline erişimi reddedilir"
+    audit_requirements: []
+    observability_requirements:
+      - "timeline_query_latency"
+    api_impact: "GET /v1/workflow-instances/{id}/timeline"
+    data_model_impact: "Read model / projection (operasyonel tabloları yormaz)"
+    test_cases:
+      - "integration: koşul gerekçesi timeline'da görünür"
+      - "integration: human/system aksiyon ayrımı"
+      - "security: cross-tenant timeline reddedilir"
+      - "security: yetkisiz kullanıcı başkasının timeline'ını göremez"
+      - "frontend: loading/empty/error/permission-denied state'leri"
+    edge_cases:
+      - "Çok uzun timeline (pagination)"
+      - "Terminal instance'ın timeline'ı (tamamlandı göstergesi)"
+      - "Revizyon sonrası eski onayların timeline'da nasıl gösterileceği (geçersiz kılındı işareti)"
+    dependencies: [FP-E13-002, FP-E10-003]
+    definition_of_done:
+      - "Gerekçe gösterimi testli"
+      - "Yetki testleri geçiyor"
+      - "Ekran state'leri tamam"
+    complexity: M
+    status: draft
+
+  # ==========================================================================
+  # E14 — Temel Dashboard
+  # ==========================================================================
+
+  - id: FP-E14-001
+    title: Dashboard read model ve sayaçlar
+    epic_id: E14
+    persona: org_admin
+    user_story: >
+      Bir yönetici olarak, bekleyen onayları ve açık talepleri tek ekranda görmek istiyorum;
+      böylece darboğazı fark edeyim.
+    business_value: "Operasyon görünürlüğü — ürünün yönetici değeri."
+    scope:
+      - "Sayaçlar: açık talepler, bekleyen onaylar, tamamlanan süreçler, reddedilenler"
+      - Read model / materialized aggregate (operasyonel tabloları yormaz)
+      - "Yetki kontrollü: kullanıcı yalnız yetkili olduğu kapsamı görür"
+    out_of_scope:
+      - Cycle time, SLA, darboğaz analizi, trend, CSV export (MVP dışı)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Dashboard görüntülendiğinde"
+        when: "Sayaçlar hesaplandığında"
+        then: "Değerler kaynak kayıtlarla TUTARLIDIR (reconciliation testi)"
+      - id: AC-2
+        given: "Dashboard sorgusu çalıştığında"
+        when: "Veri okunduğunda"
+        then: "Read model kullanılır; operasyonel tablolar ağır sorgu ile yorulmaz"
+      - id: AC-3
+        given: "Bir member rolündeki kullanıcı"
+        when: "Dashboard'a baktığında"
+        then: "Yalnız yetkili olduğu kapsamı görür; tüm tenant'ın verisini GÖRMEZ"
+    domain_rules:
+      - "Analytics operasyonel tabloları doğrudan ağır sorgularla yavaşlatmaz (PRD §9.16)"
+    security_requirements:
+      - "Dashboard sorguları tenant + authorization filtreli"
+      - "Cross-tenant sayım YASAK"
+    audit_requirements: []
+    observability_requirements:
+      - "dashboard_query_latency (p95 < 2.5 s ilk yükleme hedefi)"
+    api_impact: "GET /v1/analytics/operations"
+    data_model_impact: "Read model tablosu veya materialized view; idempotent projection"
+    test_cases:
+      - "integration: reconciliation — read model sayıları kaynak kayıtlarla eşleşir"
+      - "security: cross-tenant sayım yapılmaz"
+      - "security: member sınırlı kapsam görür"
+      - "integration: projection idempotent (replay güvenli)"
+    edge_cases:
+      - "Read model gecikmesi (eventual consistency) → UI'da 'güncelleniyor' göstergesi"
+      - "Projection'ın duplicate event ile iki kez sayması (idempotency)"
+    dependencies: [FP-E10-004, FP-E11-003]
+    definition_of_done:
+      - "Reconciliation testi geçiyor"
+      - "Yetki filtreleme testli"
+    complexity: M
+    status: draft
+
+  - id: FP-E14-002
+    title: Dashboard ekranı ve durum göstergeleri
+    epic_id: E14
+    persona: org_admin
+    user_story: >
+      Bir yönetici olarak, dashboard'da veri yokken, yüklenirken veya hata olduğunda ne
+      olduğunu anlamak istiyorum.
+    business_value: "Yalnız happy path gösteren bir ekran, gerçek kullanımda güven kırar."
+    scope:
+      - Dashboard ekranı; sayaç kartları
+      - "Zorunlu state'ler: loading/skeleton, empty, permission-denied, error, processing"
+      - Deep link (sayaçtan ilgili listeye)
+    out_of_scope:
+      - Grafikler, trend, filtreleme
+    acceptance_criteria:
+      - id: AC-1
+        given: "Hiç talep yokken"
+        when: "Dashboard açıldığında"
+        then: "Empty state ve yönlendirici mesaj gösterilir (boş canvas bırakılmaz)"
+      - id: AC-2
+        given: "Read model henüz güncellenmemişken"
+        when: "Dashboard açıldığında"
+        then: "Veri 'güncelleniyor' olarak gösterilir; yanlış kesinlikte sayı gösterilmez"
+    domain_rules: []
+    security_requirements:
+      - "Yetkisiz kart/sayaç gizlenir VE backend'de de engellenir"
+    audit_requirements: []
+    observability_requirements: []
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "frontend: loading/empty/error/permission-denied state'leri"
+      - "frontend: deep link ilgili listeye gider"
+    edge_cases:
+      - "Çok büyük sayılar (formatlama)"
+      - "Locale-aware sayı/tarih gösterimi"
+    dependencies: [FP-E14-001]
+    definition_of_done:
+      - "Tüm zorunlu ekran state'leri implemente ve testli"
+    complexity: S
+    status: draft
+
+  # ==========================================================================
+  # E15 — Satın Alma E2E Demo
+  # ==========================================================================
+
+  - id: FP-E15-001
+    title: Satın alma workflow şablonu (seed)
+    epic_id: E15
+    persona: process_owner
+    user_story: >
+      Bir süreç sahibi olarak, satın alma sürecini sıfırdan tasarlamak yerine hazır bir
+      şablondan başlatmak istiyorum.
+    business_value: >
+      "Kullanıcıların boş canvas'ta zorlanması" PRD'de Yüksek/Yüksek risk. Şablon-first
+      onboarding bunun önlemidir.
+    scope:
+      - "Satın alma workflow tanımı (seed) — Start / Form / Condition (iki eşik) / Sequential Approval / Notification / End"
+      - "Condition eşikleri (ASM-0001) — 10.000 TL ve 50.000 TL"
+      - "Onay zinciri, tutar < 10.000 TL — [ekip yöneticisi]"
+      - "Onay zinciri, tutar 10.000-50.000 TL — [ekip yöneticisi, finans]"
+      - "Onay zinciri, tutar > 50.000 TL — [ekip yöneticisi, finans, genel müdür]"
+      - "Form şeması ile birlikte seed edilir"
+      - "Şablondan tenant draft'ına kopyalama (bağımsız kopya)"
+    out_of_scope:
+      - İzin ve onboarding şablonları (MVP dışı)
+      - Şablon özelleştirme sihirbazı
+    acceptance_criteria:
+      - id: AC-1
+        given: "Bir şablon kopyalandığında"
+        when: "Tenant draft'ı oluştuğunda"
+        then: "Kopya BAĞIMSIZDIR; şablon değişikliği tenant'ın draft'ını etkilemez"
+      - id: AC-2
+        given: "Şablon yayınlandığında"
+        when: "5.000 / 25.000 / 75.000 TL tutarında talepler gönderildiğinde"
+        then: "Sırasıyla 1, 2 ve 3 adımlı onay zincirleri kurulur"
+      - id: AC-3
+        given: "Tenant eşikleri değiştirmek istediğinde"
+        when: "Draft düzenlenip yeniden yayınlandığında"
+        then: "Yeni eşikler geçerli olur; DOMAIN KODU DEĞİŞMEZ"
+    domain_rules:
+      - "Eşik değerleri ve onaycı rolleri workflow definition'dan gelir; koda gömülemez (ASM-0001)"
+      - "Eşikler geçici ürün varsayımıdır; doğrulanmamıştır"
+    security_requirements:
+      - "Şablon seed verisi production verisi içermez"
+    audit_requirements:
+      - "workflow.created (template'ten)"
+    observability_requirements: []
+    api_impact: "POST /v1/workflows (from template)"
+    data_model_impact: "Template seed (tenant'sız global tablo — whitelist'te)"
+    test_cases:
+      - "integration: şablon kopyası bağımsız"
+      - "integration: üç tutar senaryosu (5.000 / 25.000 / 75.000 TL) doğru zincirleri kurar"
+      - "integration: eşik değiştirme = yeni version yayınlama (kod değişikliği yok)"
+    edge_cases:
+      - "Tenant'ta gerekli roller (manager, finance, general_manager) yoksa"
+      - "Sınır değerler: tam 10.000,00 TL ve tam 50.000,00 TL hangi kademeye düşer (deterministik ve dokümante)"
+    dependencies: [FP-E07-003, FP-E06-002]
+    definition_of_done:
+      - "Şablon seed edildi ve kopyalama testli"
+      - "Üç kademe de e2e testli"
+      - "Eşikler hard-code değil (fitness check)"
+    complexity: S
+    status: draft
+
+  - id: FP-E15-002
+    title: Uçtan uca golden test ve demo kanıt paketi
+    epic_id: E15
+    persona: engineer
+    user_story: >
+      Bir geliştirici olarak, ilk dikey dilimin uçtan uca ÇALIŞTIĞINI kanıtlamak istiyorum;
+      böylece "yarım modüller" yerine gerçek bir süreç teslim edildiği görülsün.
+    business_value: >
+      PRD'nin talimatı: "Çok sayıda yarım modül yerine bir sürecin uçtan uca çalışması
+      tercih edilmelidir."
+    scope:
+      - "Golden e2e — giriş, organizasyon/membership, talep, koşul, sıralı onay, state transition, notification, audit, timeline"
+      - "Alternatif yollar — ret ve değişiklik talebi"
+      - "Dayanıklılık — worker restart, duplicate event, duplicate approval"
+      - "Güvenlik — cross-tenant erişim"
+      - "Demo kanıt paketi (test çıktıları, ekran görüntüleri, API örnekleri)"
+    out_of_scope:
+      - Yük/soak testi, erişilebilirlik denetimi, DR game day (sonraki faz)
+    acceptance_criteria:
+      - id: AC-1
+        given: "Tutar 10.000 TL üzerinde bir talep"
+        when: "İki adımlı onay tamamlandığında"
+        then: "Instance completed; talep approved; bildirim ve audit kayıtları eksiksiz; timeline doğru"
+      - id: AC-2
+        given: "Onay sürecinin ortasında worker öldürüldüğünde"
+        when: "Worker yeniden başlatıldığında"
+        then: "Süreç doğru tamamlanır; duplicate side effect oluşmaz"
+      - id: AC-3
+        given: "Aynı onay komutu iki kez gönderildiğinde"
+        when: "E2E akış tamamlandığında"
+        then: "Tek karar, tek bildirim, tek audit kaydı"
+      - id: AC-4
+        given: "Tenant A'nın kullanıcısı"
+        when: "Tenant B'nin talebine/onayına/dosyasına erişmeye çalıştığında"
+        then: "Tüm denemeler reddedilir"
+      - id: AC-5
+        given: "Bir talep reddedildiğinde"
+        when: "Akış tamamlandığında"
+        then: "Instance rejected; requester bilgilendirilir; açık task/timer kapanır"
+    domain_rules:
+      - "Tüm sistem invariant'ları e2e akışta korunur"
+    security_requirements:
+      - "Cross-tenant, duplicate approval ve yetkisiz karar senaryoları e2e'de test edilir"
+      - "Workflow runtime E2E'de MOCK'LANAMAZ (PRD §39: 'Mocking Entire Workflow Engine in E2E' anti-pattern'dir)"
+    audit_requirements:
+      - "E2E akışta üretilen tüm audit kayıtlarının eksiksizliği doğrulanır"
+    observability_requirements:
+      - "E2E akışta trace zinciri (talep → instance → onay → bildirim) uçtan uca izlenebilir"
+    api_impact: none
+    data_model_impact: none
+    test_cases:
+      - "e2e: happy path (2 adımlı onay)"
+      - "e2e: happy path (1 adımlı onay, düşük tutar)"
+      - "e2e: ret yolu"
+      - "e2e: değişiklik talebi + revizyon + yeniden onay"
+      - "resilience: worker restart ortasında akış"
+      - "security: duplicate approval → tek karar"
+      - "security: duplicate event → tek side effect"
+      - "security: cross-tenant erişim reddedilir"
+    edge_cases:
+      - "Revizyon sonrası tutar eşiğin altına düşerse zincir kısalır"
+      - "Onaycı membership'i süreç ortasında suspend edilirse"
+      - "İki onaycının eşzamanlı kararı"
+    dependencies:
+      - FP-E15-001
+      - FP-E13-003
+      - FP-E14-002
+      - FP-E12-002
+      - FP-E10-004
+      - FP-E06-003
+    definition_of_done:
+      - "Tüm e2e senaryoları yeşil"
+      - "Runtime e2e'de mock'lanmadı"
+      - "Demo kanıt paketi üretildi"
+      - "MVP çıkış kriterlerinin ilk dilime düşen kısmı karşılandı"
+    complexity: L
+    status: draft
+
+# ============================================================================
+# ÖZET
+# ============================================================================
+summary:
+  story_count: 48
+  complexity_distribution:
+    XS: 0
+    S: 12
+    M: 31
+    L: 5
+    XL: 0        # XL YASAK
+  status_distribution:
+    done: 3       # FP-E00-001, FP-E00-002 (governance), FP-E01-001 (auth provider kararı: Supabase)
+    blocked: 5    # LOCK-003 (runtime core) → FP-E09-001..005
+    draft: 40
+  blocked_reason:
+    LOCK-003: "Workflow runtime spike (E08) 12/12 geçmeden runtime core başlamaz → FP-E09-001..005"
+  closed_locks:
+    LOCK-004: "✅ KAPANDI 2026-07-14 — Supabase Auth (ADR-005). FP-E01-002 ve FP-E01-003 artık blocked DEĞİL."
+  owner_decisions_applied:
+    - "Auth: Supabase Auth — yalnız authentication; org/membership/RBAC/tenant FlowPilot domain'inde"
+    - "Kapsam: docs/product/mvp-scope-v0.1.md bağlayıcı; PRD değiştirilmedi"
+    - "E-posta bildirimi: pilot-ready; NotificationChannelPort MVP'de kanal-nötr tasarlanır"
+    - "Malware tarama: pilot-ready güvenlik kriteri; MalwareScanPort MVP'de hazır, adapter stub"
+    - "Onay eşikleri: 10.000 / 50.000 TL, 1-3 adımlı zincir — koda hard-code EDİLEMEZ (ASM-0001)"
+  next_action: "Owner'ın repository bootstrap komutu bekleniyor (OQ-003 prensipte onaylandı)"

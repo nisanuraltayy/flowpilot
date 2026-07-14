@@ -1,0 +1,168 @@
+# FlowPilot — .gitignore
+#
+# KURAL: Secret, kişisel veri ve production credential ASLA commit edilmez.
+# Bkz. .claude/rules/security.md §7
+
+# ============================================================ SECRET / ENV
+# .env.example DIŞINDA hiçbir env dosyası commit edilmez.
+.env
+.env.*
+!.env.example
+*.env
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+credentials.json
+service-account*.json
+.supabase/
+.aws/
+.netrc
+
+# ============================================================ PYTHON
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# Araç cache'leri
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.ruff_cache/
+.pytest_cache/
+.tox/
+.nox/
+.hypothesis/
+cython_debug/
+
+# ============================================================ NODE / NEXT.JS
+node_modules/
+.pnp/
+.pnp.js
+.yarn/
+jspm_packages/
+
+# Build çıktıları
+.next/
+out/
+build/
+dist/
+.turbo/
+.swc/
+*.tsbuildinfo
+next-env.d.ts
+
+# Paket yöneticisi
+.npm/
+.eslintcache
+.stylelintcache
+
+# ============================================================ TEST / COVERAGE
+htmlcov/
+.coverage
+.coverage.*
+coverage/
+coverage.xml
+*.cover
+*.py,cover
+nosetests.xml
+junit.xml
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+/test-results/
+
+# ============================================================ LOG
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ============================================================ DOCKER / LOCAL VOLUME
+# Local geliştirme veritabanı ve object storage verisi ASLA commit edilmez.
+.docker/
+docker-data/
+infra/containers/data/
+infra/containers/volumes/
+postgres-data/
+pgdata/
+minio-data/
+*.pid
+
+# ============================================================ IDE / EDITOR
+.vscode/*
+!.vscode/settings.json.example
+!.vscode/extensions.json
+.idea/
+*.iml
+*.ipr
+*.iws
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.history/
+
+# ============================================================ İŞLETİM SİSTEMİ
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+# Linux
+.directory
+.Trash-*
+.nfs*
+
+# ============================================================ GEÇİCİ
+tmp/
+temp/
+.cache/
+*.tmp
+*.bak
+*.orig
+*.rej
