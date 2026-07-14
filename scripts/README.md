@@ -2,11 +2,21 @@
 
 Kalite kapılarını **çalıştırılabilir** hâle getiren script'ler. CI ve local'de **aynı** script'ler çalışır — "bende çalışıyordu" durumunu engellemek için.
 
+## Mevcut script'ler
+
+| Script | Rol |
+|---|---|
+| **`check_import_boundaries.py`** | **Çalışıyor.** Salt-okunur AST analizi ile katman import kurallarını zorlar: (1) domain'de FastAPI/SQLAlchemy/Supabase importu yasak, (2) cross-context `domain`/`infrastructure` importu yasak, (3) composition root domain/infrastructure'a erişemez (wiring hariç). import-linter bu kuralları boş paketlerde ifade edemediği için vardır — bkz. [ASM-0011](../docs/assumptions.md). Production logic içermez. |
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_import_boundaries.py apps/backend/src
+```
+
 ## Üretilecek script'ler
 
 | Script | Rol |
 |---|---|
-| `check-architecture.*` | Mimari fitness function'ları: FF-01…FF-16 ([dependency-rules.md](../docs/architecture/dependency-rules.md)) |
+| `check-architecture.*` | Kalan mimari fitness function'ları: FF-03…FF-16 ([dependency-rules.md](../docs/architecture/dependency-rules.md)) |
 | `check-contracts.*` | OpenAPI lint + breaking-change diff + AsyncAPI validation |
 | `check-secrets.*` | Secret tarama (her commit'te) |
 | `verify-migrations.*` | Boş DB ve önceki release şeması üzerinde migration testi |

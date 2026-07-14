@@ -21,13 +21,18 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 | Owner-approved MVP kapsamı | ✅ Tamamlandı |
 | Backlog (16 epic, 48 story) | ✅ Tamamlandı |
 | Environment preflight | ✅ Tamamlandı |
-| **Repository foundation bootstrap** | ✅ **Bu aşama** |
-| Bootstrap doğrulaması | ⏳ Sıradaki |
-| Backend / frontend scaffold | ⛔ Henüz başlamadı |
+| Repository foundation bootstrap | ✅ Tamamlandı |
+| Python fiziksel yerleşimi (ADR-009) | ✅ Tamamlandı |
+| **Backend scaffold + quality tooling** | ✅ **Bu aşama** |
+| Local altyapı (PostgreSQL + MinIO) | ⏳ Sıradaki |
+| Frontend scaffold | ⛔ Henüz başlamadı |
+| İlk dikey dilim (satın alma) | ⛔ Henüz başlamadı |
 
-Repository'de bulunmayanlar (kasıtlı): kaynak kodu, `pyproject.toml`, `package.json`, `Dockerfile`, `docker-compose.yml`, migration, dependency.
+**Backend scaffold çalışır durumdadır** ancak **hiçbir iş özelliği içermez**: yalnız health endpoint'leri, worker `--check` doğrulaması, ayar yönetimi ve kalite araçları (pytest, Ruff, mypy strict, import-linter, AST boundary check).
 
-**Sonraki aşama scaffold DEĞİLDİR.** Önce bu bootstrap'ın doğrulanması gerekir (klasör sınırları, satır sonları, secret taraması, ilk commit). Scaffold ayrıca onaylanacaktır.
+Repository'de bulunmayanlar (kasıtlı): database bağlantısı, SQLAlchemy modeli, migration, `alembic.ini`, tenant/RLS, Supabase entegrasyonu, authentication, workflow runtime, outbox, `Dockerfile`, `docker-compose.yml`, frontend.
+
+**13 bounded context paketi boştur** — içlerinde production business logic yoktur.
 
 ---
 
@@ -147,11 +152,29 @@ from flowpilot.modules.approval.infrastructure.models import ApprovalStepRow   #
 
 ---
 
-## Kurulum
+## Kurulum (Windows PowerShell)
 
-> **Henüz kurulacak bir şey yok.** Dependency, virtual environment, container ve scaffold **bilinçli olarak oluşturulmamıştır.**
+Backend scaffold çalışır durumdadır. Frontend henüz yok.
 
-Kurulum talimatları backend/frontend scaffold aşamasında bu bölüme eklenecektir. `.env.example` ileride hangi kategorilerde değişken gerekeceğini gösterir; **gerçek secret içermez**.
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e "apps/backend[dev]"
+```
+
+Kalite kapıları:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest apps/backend/tests
+.\.venv\Scripts\python.exe -m ruff check apps/backend/src apps/backend/tests scripts
+.\.venv\Scripts\python.exe -m ruff format --check apps/backend/src apps/backend/tests scripts
+.\.venv\Scripts\python.exe -m mypy --config-file apps/backend/pyproject.toml apps/backend/src
+.\.venv\Scripts\lint-imports.exe --config apps/backend/pyproject.toml
+.\.venv\Scripts\python.exe scripts/check_import_boundaries.py apps/backend/src
+.\.venv\Scripts\python.exe -m flowpilot.worker --check
+```
+
+Ayrıntı: [apps/backend/README.md](apps/backend/README.md). `.venv` Git'e **eklenmez**. `.env.example` gerçek secret **içermez**.
 
 ---
 

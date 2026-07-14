@@ -91,21 +91,28 @@ Genişletilmiş liste: [.claude/rules/architecture.md](.claude/rules/architectur
 
 ## 6. Çalıştırılması zorunlu kalite kontrolleri
 
-> **Şu an:** Repository bootstrap henüz onaylanmadı. Kod, dependency ve komut bulunmuyor. Bu bölümdeki kapılar bootstrap (Epic E00) tamamlandığında zorunlu hâle gelir. **Var olmayan komutu uydurma ve çalıştırma.**
+Backend scaffold hazır. **Bu komutlar çalışır ve her story'de geçmek zorundadır** (`.venv` repo kökündedir):
 
-Bootstrap sonrasında her story için zorunlu kapılar:
+```powershell
+.\.venv\Scripts\python.exe -m pytest apps/backend/tests
+.\.venv\Scripts\python.exe -m ruff check apps/backend/src apps/backend/tests scripts
+.\.venv\Scripts\python.exe -m ruff format --check apps/backend/src apps/backend/tests scripts
+.\.venv\Scripts\python.exe -m mypy --config-file apps/backend/pyproject.toml apps/backend/src
+.\.venv\Scripts\lint-imports.exe --config apps/backend/pyproject.toml
+.\.venv\Scripts\python.exe scripts/check_import_boundaries.py apps/backend/src
+```
 
-| Kapı | Kapsam |
+Henüz kurulmamış, ilgili aşamada eklenecek kapılar (**var olmayan komutu uydurma**):
+
+| Kapı | Ne zaman |
 |---|---|
-| Format + lint | Backend ve frontend |
-| Type check | Python type check + TypeScript |
-| Unit test | Domain, policy, evaluator, state machine |
-| Integration test | DB transaction, outbox, worker, storage portu |
-| Contract test | OpenAPI/AsyncAPI lint + breaking-change diff |
-| Cross-tenant test | Tenant verisine dokunan her story'de zorunlu |
-| Negative authorization test | Yetki kontrolü olan her endpoint'te zorunlu |
-| Migration test | Boş DB + bir önceki release şeması üzerinde |
-| Secret scan | Her commit |
+| Integration test (DB, RLS, outbox) | Local PostgreSQL altyapısı sonrası |
+| Contract test (OpenAPI/AsyncAPI) | İlk endpoint sözleşmesiyle |
+| Cross-tenant test | Tenant verisine dokunan ilk story'de — **o story'den itibaren zorunlu** |
+| Negative authorization test | Yetki kontrolü olan ilk endpoint'te — **zorunlu** |
+| Migration test | İlk migration ile |
+| Frontend lint/typecheck/test | Frontend scaffold sonrası |
+| Secret scan | CI kurulumunda |
 
 Bu kapıların tümü geçmeden story **done** sayılmaz.
 

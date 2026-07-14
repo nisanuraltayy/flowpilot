@@ -102,6 +102,32 @@ Format:
     ayrı modül açılmayabilirdi. Bu durumda ikinci süreç eklendiğinde generic bir
     "Request" kavramı ortaya çıkar. Şu anki tercih daha açık (explicit) olduğu için seçildi.
 
+- id: ASM-0011
+  statement: >
+    Bounded context'lerin domain/application/infrastructure alt paketleri henüz
+    OLUŞTURULMADIĞI için, katman bazlı import kuralları (domain FastAPI/SQLAlchemy
+    import edemez; cross-context domain/infrastructure importu yasak; composition root
+    domain/infrastructure'a erişemez) import-linter ile HENÜZ ifade edilemiyor —
+    grimp var olmayan modülü çözemez.
+    Kontrol sessizce kaldırılmadı: aynı kurallar salt-okunur bir AST script'i ile
+    zorlanıyor (scripts/check_import_boundaries.py) ve script'in üç ihlal sınıfını da
+    yakaladığı sahte bir ihlal ağacına karşı kanıtlandı.
+  impact: medium
+  reversible: true
+  owner: engineering
+  status: unvalidated
+  validation_method: >
+    İlk bounded context'in domain/application/infrastructure paketleri oluştuğunda
+    (E01/E02 story'leri) kuralların import-linter contract'larına taşınması denenecek.
+    Taşınabilirse AST script'i kaldırılır; taşınamazsa script kalıcı kontrol olur.
+  expires_at: 2026-10-01
+  affected_stories: [FP-E01-002, FP-E02-001]
+  note: >
+    Şu an import-linter 4 contract zorluyor (katman sırası, api/worker bağımsızlığı,
+    shared saflığı, modules'ün web framework'e bağımlı olamaması). Eksik olan YALNIZ
+    context içi katman kurallarıdır; onlar da AST ile zorlanıyor. İki aracın birlikte
+    çalışması geçici bir durumdur, kalıcı tasarım değildir.
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde

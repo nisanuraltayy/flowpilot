@@ -220,6 +220,10 @@ FP-Exx-000
 
 ## 10. Şu anki repository durumu
 
-Repository **yalnızca dokümantasyon** aşamasındadır. Henüz kod, dependency, migration, Docker dosyası veya paket manifesti **yoktur ve owner onayı olmadan oluşturulmaz**.
+**Backend scaffold hazır ve çalışıyor** — ancak **hiçbir iş özelliği içermiyor**.
 
-Bir sonraki adım (Epic E00) owner onayına bağlıdır. Agent bu onay olmadan scaffold, `pyproject.toml`, `package.json`, `Dockerfile`, migration veya kaynak kodu üretmez.
+**Var olanlar:** `apps/backend/pyproject.toml` (tek distribution `flowpilot-backend`), `flowpilot.api` (yalnız `/health/live` + `/health/ready`), `flowpilot.worker` (yalnız `--check`), `flowpilot.config.settings`, 13 **boş** bounded context paketi, test altyapısı ve kalite araçları (pytest, Ruff, mypy strict, import-linter, AST boundary check). Repo kökünde `.venv`.
+
+**Hâlâ YOK ve owner onayı olmadan oluşturulmaz:** database bağlantısı, SQLAlchemy modeli, migration, `alembic.ini`, tenant/RLS, Supabase entegrasyonu, authentication, workflow runtime, purchase request, outbox/worker loop, `Dockerfile`, `docker-compose.yml`, frontend scaffold, health dışında API endpoint'i.
+
+Kalite kapıları için bkz. [CLAUDE.md](CLAUDE.md) §6 — **bu komutlar çalışır ve geçmek zorundadır**.

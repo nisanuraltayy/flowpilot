@@ -1,0 +1,181 @@
+[build-system]
+requires = ["setuptools>=77.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowpilot-backend"
+version = "0.1.0"
+description = "FlowPilot backend — modular monolith (API + worker, single distribution)"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+authors = [{ name = "Nisa Nur Altay" }]
+classifiers = [
+  "Private :: Do Not Upload",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+
+# Runtime — yalnız gerçekten gereken paketler (bkz. README §Dependency grupları).
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "uvicorn[standard]>=0.32,<1.0",
+  "pydantic>=2.9,<3.0",
+  "pydantic-settings>=2.6,<3.0",
+  "sqlalchemy>=2.0,<3.0",
+  "alembic>=1.14,<2.0",
+  "psycopg[binary]>=3.2,<4.0",
+  "structlog>=24.4,<26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9.0",
+  "pytest-asyncio>=0.24,<2.0",
+  "pytest-cov>=6.0,<8.0",
+  # Starlette 1.3+ TestClient için httpx2 ister; `httpx` ile kullanım
+  # DeprecationWarning üretir ve pytest'te uyarılar hataya çevrilir.
+  "httpx2>=2.7,<3.0",
+  "ruff>=0.8,<1.0",
+  "mypy>=1.13,<2.0",
+  "import-linter>=2.1,<3.0",
+  "testcontainers[postgres]>=4.8,<5.0",
+]
+
+# ---------------------------------------------------------------------------
+# Packaging — src-layout, tek import kökü: flowpilot  (ADR-009)
+# ---------------------------------------------------------------------------
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["flowpilot*"]
+
+# ---------------------------------------------------------------------------
+# Ruff — lint + format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes (kullanılmayan import = hata)
+  "I",    # isort — import sırası
+  "N",    # pep8-naming
+  "UP",   # pyupgrade
+  "B",    # flake8-bugbear — yaygın hata tuzakları
+  "C4",   # flake8-comprehensions
+  "SIM",  # flake8-simplify
+  "S",    # flake8-bandit — güvenlik
+  "ASYNC",# flake8-async
+  "RUF",  # ruff'a özgü kurallar
+]
+# Topluca ignore YOK. Aşağıdaki istisnaların her biri gerekçelidir:
+#
+#   S104            0.0.0.0'a bind: container içinde zorunludur; host değeri config'ten
+#                   gelir ve production'da reverse proxy arkasındadır.
+#
+#   RUF001/002/003  "Ambiguous unicode character" — bu kurallar ASCII ağırlıklı kod
+#                   tabanlarında homoglyph saldırısı yakalamak içindir. FlowPilot'ın
+#                   doküman ve yorum dili TÜRKÇE'dir (ı, ş, ğ, İ, em-dash). Kural,
+#                   docstring ve yorumlardaki her Türkçe harfi hata sayar ve saf
+#                   gürültü üretir. YALNIZ string/comment/docstring içeriğini etkiler;
+#                   tanımlayıcılar (identifier) ASCII kalır ve N (pep8-naming) ile
+#                   zorlanır.
+ignore = ["S104", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Testlerde `assert` pytest'in temel mekanizmasıdır (S101).
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["flowpilot"]
+
+# ---------------------------------------------------------------------------
+# mypy — strict
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["flowpilot"]
+strict = true
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+show_error_codes = true
+pretty = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+  "--strict-markers",
+  "--strict-config",
+  "-ra",
+  "--cov=flowpilot",
+  "--cov-report=term-missing",
+]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+# Uyarılar gizlenmez — hataya çevrilir.
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["flowpilot"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = ["if TYPE_CHECKING:", "raise NotImplementedError"]
+
+# ---------------------------------------------------------------------------
+# import-linter — mimari import sınırları
+#
+# NOT: Bounded context'ler şu an BOŞ paketlerdir (domain/application/
+# infrastructure alt paketleri henüz yok). Bu yüzden katman bazlı contract'lar
+# (ör. "domain FastAPI import edemez") import-linter ile HENÜZ ifade edilemez —
+# grimp var olmayan modülü çözemez. O kurallar, boş pakette de çalışan
+# salt-okunur AST kontrolü ile zorlanır: scripts/check_import_boundaries.py
+# Bkz. ASM-0011 (docs/assumptions.md).
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["flowpilot"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Katman sırası: composition root > modules > config/observability > shared"
+type = "layers"
+layers = [
+  "flowpilot.api : flowpilot.worker",
+  "flowpilot.modules",
+  "flowpilot.config : flowpilot.observability",
+  "flowpilot.shared",
+]
+exhaustive = false
+
+[[tool.importlinter.contracts]]
+name = "api ve worker birbirinden bağımsızdır"
+type = "independence"
+modules = ["flowpilot.api", "flowpilot.worker"]
+
+[[tool.importlinter.contracts]]
+name = "flowpilot.shared saf kalır (framework/ORM/provider SDK import edemez)"
+type = "forbidden"
+source_modules = ["flowpilot.shared"]
+forbidden_modules = ["fastapi", "sqlalchemy", "supabase", "psycopg", "alembic"]
+
+[[tool.importlinter.contracts]]
+name = "flowpilot.modules web framework'e bağımlı olamaz"
+type = "forbidden"
+source_modules = ["flowpilot.modules"]
+forbidden_modules = ["fastapi", "uvicorn"]
