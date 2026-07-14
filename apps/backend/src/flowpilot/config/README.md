@@ -1,4 +1,4 @@
-# packages/config — Konfigürasyon Yükleme
+# flowpilot.config — Konfigürasyon Yükleme
 
 Environment değişkenlerinin **tek yerden**, **tip güvenli** ve **doğrulanmış** şekilde okunması.
 
@@ -14,7 +14,7 @@ Environment değişkenlerinin **tek yerden**, **tip güvenli** ve **doğrulanmı
 - `SUPABASE_SERVICE_ROLE_KEY` yalnız backend'de bulunur; frontend'e **ASLA** verilmez.
 - **Production'da `fake` adapter YASAKTIR** — config guard bunu engellemelidir.
 - Uygulama, veritabanına **`BYPASSRLS` yetkisi olmayan** rolle bağlanır (ADR-006). Migration için ayrı, DDL yetkili rol kullanılır.
-- Değişken kategorileri: [.env.example](../../.env.example)
+- Değişken kategorileri: [.env.example](../../../../../.env.example)
 
 ## Durum
 

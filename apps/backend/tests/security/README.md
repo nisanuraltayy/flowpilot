@@ -1,4 +1,4 @@
-# tests/security — Güvenlik Regresyon Suite'i
+# apps/backend/tests/security — Güvenlik Regresyon Suite'i
 
 Cross-tenant veri sızıntısı PRD'de **"Kritik"** etkili risktir ve itibar açısından geri döndürülemez. Bu suite olmadan izolasyon iddiası **kanıtsızdır**.
 

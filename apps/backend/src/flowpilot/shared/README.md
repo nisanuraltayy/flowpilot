@@ -1,4 +1,4 @@
-# packages/shared — Paylaşılan Primitive'ler
+# flowpilot.shared — Paylaşılan Primitive'ler
 
 ## İçerik (yalnızca bunlar)
 

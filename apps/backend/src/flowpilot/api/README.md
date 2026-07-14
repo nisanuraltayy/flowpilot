@@ -1,4 +1,4 @@
-# apps/api — Senkron HTTP API (FastAPI)
+# flowpilot.api — Senkron HTTP API (FastAPI)
 
 **Rol:** Composition root. HTTP isteğini karşılar, actor ve tenant context'ini çözer, ilgili modülün command/query'sini çağırır, sonucu döner.
 

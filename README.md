@@ -61,6 +61,7 @@ PRD **değiştirilmez**. Teslim kapsamı için `mvp-scope-v0.1.md`, mühendislik
 | Tenant izolasyonu | Application scope **+** PostgreSQL Row Level Security (defense-in-depth) | [ADR-006](docs/adr/ADR-006-postgresql-tenant-isolation.md) |
 | Asenkron işlem | Transactional outbox + PostgreSQL-backed polling worker (broker yok) | [ADR-007](docs/adr/ADR-007-transactional-outbox.md) |
 | Repository | Monorepo | [ADR-008](docs/adr/ADR-008-monorepo.md) |
+| Python yerleşimi | **Tek distribution** (`flowpilot-backend`), tek import kökü `flowpilot`, bounded context'ler `flowpilot.modules.*` | [ADR-009](docs/adr/ADR-009-python-physical-layout.md) |
 
 **MVP workflow node seti (yalnız 6):** `Start`, `Form`, `Condition`, `Sequential Approval`, `Notification`, `End`.
 Kapsam dışı: parallel/join, quorum, sub-workflow, webhook, script, AI, DMN, görsel canvas.
@@ -71,36 +72,50 @@ Kapsam dışı: parallel/join, quorum, sub-workflow, webhook, script, AI, DMN, g
 
 ## Monorepo klasörleri
 
+Fiziksel yerleşim kararı: [ADR-009](docs/adr/ADR-009-python-physical-layout.md) — **tek Python distribution**, tek import kökü (`flowpilot`).
+
 ```text
 flowpilot/
-├── apps/          # Deployable birimler (composition root)
-│   ├── api/       #   FastAPI — senkron HTTP API
-│   ├── worker/    #   Outbox dispatcher, timer worker, event consumer
-│   └── web/       #   Next.js kullanıcı uygulaması
-├── modules/       # Bounded context'ler — iş mantığının yaşadığı yer
-├── packages/      # Paylaşılan sözleşmeler ve altyapı paketleri
-├── infra/         # Container tanımları ve migration'lar
-├── scripts/       # Geliştirme ve doğrulama script'leri
-├── tests/         # Uygulama sınırını aşan testler (e2e, güvenlik)
-├── docs/          # PRD, ADR, mimari, kapsam, backlog
-└── .claude/rules/ # Agent için bağlayıcı kurallar
+├── apps/
+│   ├── backend/                    # TEK Python distribution (flowpilot-backend)
+│   │   ├── pyproject.toml          #   (henüz yok)
+│   │   ├── alembic.ini             #   (henüz yok)
+│   │   ├── migrations/             #   Alembic — TEK history
+│   │   ├── src/flowpilot/          #   tek import kökü
+│   │   │   ├── shared/             #     Money, TenantId, ClockPort, IdGeneratorPort
+│   │   │   ├── observability/      #     log, metric, trace
+│   │   │   ├── config/             #     env yükleme ve doğrulama
+│   │   │   ├── modules/            #     13 bounded context — İŞ MANTIĞI BURADA
+│   │   │   ├── api/                #     FastAPI composition root (iş mantığı YOK)
+│   │   │   └── worker/             #     outbox/timer worker root (iş mantığı YOK)
+│   │   └── tests/                  #   unit, integration, contract, security
+│   └── web/                        # Next.js kullanıcı uygulaması
+├── packages/
+│   ├── contracts/                  # OpenAPI/AsyncAPI/JSON Schema + üretilen TS tipleri
+│   └── ui/                         # Frontend design system
+├── infra/containers/               # Dockerfile'lar, docker-compose (PostgreSQL + MinIO)
+├── scripts/                        # Fitness check, contract lint, secret scan
+├── tests/e2e/                      # Tarayıcı e2e (web + API birlikte)
+├── docs/                           # PRD, ADR, mimari, kapsam, backlog
+└── .claude/rules/                  # Agent için bağlayıcı kurallar
 ```
 
 | Klasör | Sorumluluk |
 |---|---|
-| `apps/` | Yalnız **composition root**. İş mantığı içermez; modülleri birbirine bağlar ve dış dünyaya açar. |
-| `modules/` | 13 bounded context. Her modül kendi tablolarına sahiptir; başka modülün tablosuna **yazamaz**. |
-| `packages/` | Sözleşmeler (OpenAPI/AsyncAPI + üretilen tipler), paylaşılan primitive'ler, observability, test altyapısı, config. |
-| `infra/` | Docker container tanımları ve Alembic migration'ları. |
+| `apps/backend/src/flowpilot/modules/` | 13 bounded context. Her modül kendi tablolarına sahiptir; başka modülün tablosuna **yazamaz**. |
+| `apps/backend/src/flowpilot/{api,worker}/` | İki composition root, **tek distribution**. İş mantığı içermezler; adapter wiring burada yapılır. |
+| `apps/web/` | Next.js. Backend modüllerini import etmez; yalnız `packages/contracts` üzerinden konuşur. |
+| `packages/` | Dil-nötr sözleşmeler (`contracts`) ve frontend design system (`ui`). |
+| `infra/containers/` | Docker container tanımları. Migration'lar **`apps/backend/migrations/`** altındadır. |
 | `scripts/` | Fitness check, contract lint, secret scan gibi doğrulama script'leri. |
-| `tests/` | Tek bir modülün sınırını aşan e2e ve güvenlik (cross-tenant, negatif authz) testleri. |
+| `tests/e2e/` | Web + API'yi birlikte süren tarayıcı testleri. Python testleri `apps/backend/tests/`'tedir. |
 | `docs/` | Tek gerçek kaynak. Kod ile birlikte güncellenir. |
 
 Her klasörün kendi `README.md`'si o klasörün **bağımlılık sınırını** açıklar. Bu sınırlar CI'da otomatik doğrulanacaktır ([dependency-rules.md](docs/architecture/dependency-rules.md), FF-01…FF-16).
 
 ---
 
-## Bağımlılık yönü (özet)
+## Import ve bağımlılık kuralları
 
 ```text
 presentation ──┐
@@ -109,9 +124,26 @@ infrastructure ┘        │
                         └──► ports ◄── infrastructure IMPLEMENTE eder
 ```
 
-- **Domain katmanı** FastAPI, SQLAlchemy, Pydantic, Next.js veya Supabase SDK'sına **bağımlı olamaz**.
-- Bir modül başka modülün tablosuna **yazamaz**; command veya integration event kullanır.
-- Provider entegrasyonları **yalnız adapter katmanında** bulunur.
+```python
+# ✅ composition root → application sınırı
+from flowpilot.modules.approval.application.commands import DecideApprovalStep
+
+# ❌ domain'de framework / ORM / provider SDK
+from sqlalchemy import Column        # YASAK
+from fastapi import Depends          # YASAK
+
+# ❌ başka bir context'in domain veya infrastructure katmanı
+from flowpilot.modules.approval.infrastructure.models import ApprovalStepRow   # YASAK
+```
+
+1. **Domain katmanında FastAPI, SQLAlchemy, Supabase veya provider SDK importu YASAK.**
+2. Bir bounded context, başka bir context'in **`domain` veya `infrastructure`** katmanını **doğrudan import edemez**.
+3. Modüller arası erişim **yalnız** açık application contract, command/query veya versiyonlu integration event üzerinden.
+4. `flowpilot.api` ve `flowpilot.worker` **yalnız application sınırlarını** çağırır.
+5. **Adapter wiring yalnız composition root'ta** yapılır.
+6. **`PYTHONPATH` hack'i kullanılmaz** — editable install.
+7. **Aynı bounded context için ikinci source of truth oluşturulmaz.**
+8. Bounded context klasör adları **snake_case**'dir (tireli ad Python import yolunda kullanılamaz).
 
 ---
 

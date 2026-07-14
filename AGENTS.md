@@ -19,6 +19,7 @@ FlowPilot, KOBİ'ler için çok kiracılı iş akışı ve onay platformudur. Ca
 - Mimari: modüler monolit (ADR-003)
 - Repository: monorepo (ADR-008)
 - Backend: Python + FastAPI + Pydantic + SQLAlchemy + Alembic (ADR-001)
+- **Python yerleşimi:** tek distribution `flowpilot-backend` (`apps/backend`), tek import kökü `flowpilot`, bounded context'ler `flowpilot.modules.<snake_case>`, iki composition root `flowpilot.api` ve `flowpilot.worker` (ADR-009)
 - Frontend: Next.js + TypeScript (ADR-002)
 - Veritabanı: PostgreSQL; tenant izolasyonu application scope + RLS (ADR-006)
 - Asenkron: transactional outbox + PostgreSQL-backed polling worker (ADR-007)
@@ -135,6 +136,19 @@ Varsayım formatı (PRD §33.3):
 - Lockfile yalnız dependency gerçekten değiştiyse değişir.
 - Generated artifact elle düzenlenmez.
 - Migration dosyası silinip yeniden üretilmez.
+
+---
+
+## 6b. Import kuralları (ADR-009 — bağlayıcı)
+
+1. **Domain katmanında FastAPI, SQLAlchemy, Supabase veya provider SDK importu YASAK.**
+2. Bir bounded context, başka bir context'in **`domain` veya `infrastructure`** katmanını **doğrudan import edemez**.
+3. Modüller arası erişim **yalnız** açık application contract, command/query veya versiyonlu integration event üzerinden.
+4. `flowpilot.api` ve `flowpilot.worker` **yalnız application sınırlarını** çağırır; iş mantığı içermezler.
+5. **Adapter wiring yalnız composition root'ta** (`api/deps.py`, `worker/wiring.py`).
+6. **`PYTHONPATH` hack'i YASAK** — editable install (`pip install -e apps/backend`).
+7. Bounded context klasör adları **snake_case**; tireli ad YASAK.
+8. **Aynı bounded context için ikinci source of truth YASAK.**
 
 ---
 

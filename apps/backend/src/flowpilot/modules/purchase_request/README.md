@@ -7,7 +7,7 @@
 
 İlk dikey dilimin iş domain'i: satın alma talebi (ürün/hizmet adı, kategori, tutar, para birimi, gerekçe, isteğe bağlı dosya).
 
-> Not: Bu context PRD §35.1'in bounded context tablosunda ayrıca listelenmemiştir; ilk dikey dilim satın alma talebi olduğu için ayrı modül olarak konumlandırılmıştır ([ASM-0004](../../docs/assumptions.md)).
+> Not: Bu context PRD §35.1'in bounded context tablosunda ayrıca listelenmemiştir; ilk dikey dilim satın alma talebi olduğu için ayrı modül olarak konumlandırılmıştır ([ASM-0004](../../../../../../docs/assumptions.md)).
 
 ## Sınırlar
 

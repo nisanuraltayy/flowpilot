@@ -19,7 +19,7 @@ Dosya eki: güvenli yükleme, yetki kontrollü indirme, kaynakla ilişkilendirme
 
 MVP'de `MalwareScanPort`'un yalnız **no-op/stub** adapter'ı vardır. `scan_status` alanı ve tarama tamamlanmadan indirmeyi engelleyen kapı **şimdiden hazırdır**.
 
-**Gerçek tarama entegrasyonu PILOT-READY sürümün zorunlu güvenlik çıkış kriteridir** ([ASM-0007](../../docs/assumptions.md)). Tarama entegre edilmeden Local MVP **pilot müşteriye açılmaz** — aksi hâlde bir kullanıcının yüklediği zararlı dosya aynı tenant'ta indirilebilir.
+**Gerçek tarama entegrasyonu PILOT-READY sürümün zorunlu güvenlik çıkış kriteridir** ([ASM-0007](../../../../../../docs/assumptions.md)). Tarama entegre edilmeden Local MVP **pilot müşteriye açılmaz** — aksi hâlde bir kullanıcının yüklediği zararlı dosya aynı tenant'ta indirilebilir.
 
 ## Durum
 

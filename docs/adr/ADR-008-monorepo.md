@@ -28,21 +28,27 @@ Soru: bunlar tek repository'de mi, ayrı repository'lerde mi yaşamalı?
 
 **Monorepo.** Tek git repository; içinde `api`, `worker`, `web` uygulamaları, modüller, paylaşılan sözleşme paketi ve dokümantasyon.
 
-Mantıksal yapı (fiziksel isimler bootstrap sırasında netleşir, ancak **bağımlılık yönü değişmez** — PRD §46):
+Fiziksel yerleşim **[ADR-009](ADR-009-python-physical-layout.md)** ile kesinleştirilmiştir. Güncel yapı:
 
 ```text
-/apps        → web, api, worker
-/modules     → identity, organization, authorization, workflow-design,
-               workflow-runtime, work-management, approval,
-               notification, document, audit, analytics
-/packages    → contracts (OpenAPI/AsyncAPI/JSON Schema + generated types),
-               ui, observability, testing, config
-/infra       → containers, migrations
+/apps
+  /backend     → TEK Python distribution (flowpilot-backend)
+                 src/flowpilot/{shared,observability,config,modules,api,worker}
+                 tests/{unit,integration,contract,security}
+                 alembic.ini + migrations/   (TEK migration history)
+  /web         → Next.js
+/packages
+  /contracts   → OpenAPI/AsyncAPI/JSON Schema + üretilen TS tipleri
+  /ui          → frontend design system
+/infra
+  /containers  → Dockerfile'lar, docker-compose
+/scripts       → fitness check, contract lint, secret scan
+/tests/e2e     → tarayıcı e2e (web + API)
 /docs
 /.claude/rules
 ```
 
-> Not: Bu yapı henüz **oluşturulmadı**. Repository bootstrap owner onayına bağlıdır (Epic E00).
+> **ADR-009 ile netleşen noktalar:** `api` ve `worker` ayrı Python projeleri **değildir** — aynı distribution'ın iki composition root'udur. `shared`, `observability`, `config` ve test altyapısı ayrı distribution **değildir**. Bounded context'ler `flowpilot.modules.<snake_case>` altındadır; **tireli klasör adı Python import yolunda kullanılamaz**.
 
 ## Gerekçe
 

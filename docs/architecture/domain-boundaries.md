@@ -1,8 +1,10 @@
 # Domain Boundaries — Bounded Context Haritası
 
-Bağlayıcı kaynak: PRD §11.3, §34, §35.1, §36. İlgili ADR: ADR-003 (modüler monolit), ADR-006 (tenant izolasyonu).
+Bağlayıcı kaynak: PRD §11.3, §34, §35.1, §36. İlgili ADR: [ADR-003](../adr/ADR-003-modular-monolith.md) (modüler monolit), [ADR-006](../adr/ADR-006-postgresql-tenant-isolation.md) (tenant izolasyonu), [ADR-009](../adr/ADR-009-python-physical-layout.md) (fiziksel yerleşim).
 
 Bu doküman **modül sahipliğini** tanımlar: hangi kavram hangi modüle aittir, hangi tabloyu kim yazar, modüller birbirine ne sunar.
+
+**Fiziksel konum:** Tüm bounded context'ler `apps/backend/src/flowpilot/modules/<snake_case>/` altındadır; import yolu `flowpilot.modules.<snake_case>`. Klasör adları **snake_case**'dir — tireli ad Python import yolunda kullanılamaz.
 
 ---
 
@@ -55,6 +57,26 @@ Aşağıdaki tablo **gerçek MVP kapsamındaki** modülleri gösterir. `AI Orche
 | — | AI Orchestration | — | — | — | ❌ MVP dışı |
 | — | Integration / Webhook | — | — | — | ❌ MVP dışı |
 | — | Billing & Entitlements | — | — | — | ❌ MVP dışı (sınır tasarımda korunur) |
+
+### Import yolları (ADR-009)
+
+| Context | Python import yolu |
+|---|---|
+| Identity | `flowpilot.modules.identity` |
+| Organization | `flowpilot.modules.organization` |
+| Authorization | `flowpilot.modules.authorization` |
+| Workflow Design | `flowpilot.modules.workflow_design` |
+| Workflow Runtime | `flowpilot.modules.workflow_runtime` |
+| Work Management | `flowpilot.modules.work_management` |
+| Approval | `flowpilot.modules.approval` |
+| Purchase Request | `flowpilot.modules.purchase_request` |
+| Document | `flowpilot.modules.document` |
+| Notification | `flowpilot.modules.notification` |
+| Audit | `flowpilot.modules.audit` |
+| Analytics | `flowpilot.modules.analytics` |
+| Platform | `flowpilot.modules.platform` |
+
+Bir bounded context, başka bir context'in **`domain` veya `infrastructure`** katmanını **doğrudan import edemez**; erişim yalnız açık application contract, command/query veya versiyonlu integration event üzerindendir.
 
 > **Purchase Request context'i hakkında:** PRD'de ayrı bir context olarak listelenmemiştir; ilk dikey dilim satın alma talebi olduğu için ayrı bir modül olarak konumlandırılmıştır. Bkz. [ASM-0004](../assumptions.md).
 

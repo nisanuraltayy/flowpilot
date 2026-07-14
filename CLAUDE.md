@@ -36,6 +36,7 @@ Bir çatışma olduğunda **üstteki kazanır**. Mevcut kod bu sıranın üstün
 | [ADR-006](docs/adr/ADR-006-postgresql-tenant-isolation.md) | Application-level tenant scope + PostgreSQL RLS (defense-in-depth) | Accepted |
 | [ADR-007](docs/adr/ADR-007-transactional-outbox.md) | Transactional outbox + PostgreSQL-backed polling worker | Accepted |
 | [ADR-008](docs/adr/ADR-008-monorepo.md) | Monorepo | Accepted |
+| [ADR-009](docs/adr/ADR-009-python-physical-layout.md) | **Tek Python distribution** (`flowpilot-backend`, `apps/backend`), tek import kökü `flowpilot`. Bounded context'ler `flowpilot.modules.<snake_case>`. `api` ve `worker` aynı paketin iki composition root'u | Accepted |
 
 Diğer kesinleşmiş kararlar: PostgreSQL tek source of truth · S3-compatible storage portu (local: MinIO adayı) · Arama MVP'de PostgreSQL full-text · Deployment Docker tabanlı ve provider-neutral (ilk aday Render) · AI özellikleri ve workflow builder canvas gerçek MVP dışında.
 
@@ -65,7 +66,11 @@ Kilit açıkken agent o kararı üretim kodunda **varsayamaz**. Yalnızca karş�
 
 ## 5. Yasaklanan davranışlar
 
-- Domain katmanında FastAPI, SQLAlchemy, Next.js veya provider SDK bağımlılığı.
+- Domain katmanında FastAPI, SQLAlchemy, Supabase veya provider SDK importu.
+- Bir bounded context'in başka bir context'in `domain` veya `infrastructure` katmanını doğrudan import etmesi.
+- `flowpilot.api` / `flowpilot.worker` içinde iş mantığı; composition root dışında adapter wiring.
+- `PYTHONPATH` hack'i; tireli (snake_case olmayan) Python paket adı.
+- Aynı bounded context için ikinci bir source of truth.
 - Bir modülün başka modülün tablosuna doğrudan yazması.
 - Generic repository. Aggregate-specific repository kullan.
 - Business logic'i controller veya frontend içine gömmek.

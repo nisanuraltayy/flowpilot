@@ -1,8 +1,35 @@
 # Dependency Rules — Bağımlılık Kuralları ve Fitness Function'ları
 
-Bağlayıcı kaynak: PRD §35.2, §35.3, §38, §39. İlgili ADR: ADR-001, ADR-003, ADR-008.
+Bağlayıcı kaynak: PRD §35.2, §35.3, §38, §39. İlgili ADR: [ADR-001](../adr/ADR-001-backend-stack.md), [ADR-003](../adr/ADR-003-modular-monolith.md), [ADR-008](../adr/ADR-008-monorepo.md), **[ADR-009](../adr/ADR-009-python-physical-layout.md)**.
 
 Bu kurallar **öneri değildir**. CI'da otomatik doğrulanır (bootstrap sonrası); ihlal eden PR merge edilemez.
+
+---
+
+## 0. Fiziksel yerleşim ve import kökü (ADR-009)
+
+Tek Python distribution: **`flowpilot-backend`** (`apps/backend`), tek import kökü **`flowpilot`**.
+
+```text
+apps/backend/src/flowpilot/
+├── shared/           # flowpilot.shared          — primitive'ler, ClockPort, IdGeneratorPort
+├── observability/    # flowpilot.observability
+├── config/           # flowpilot.config
+├── modules/          # flowpilot.modules.<snake_case>  — 13 bounded context
+├── api/              # flowpilot.api      — composition root
+└── worker/           # flowpilot.worker   — composition root
+```
+
+**Bağlayıcı import kuralları:**
+
+1. **Domain katmanında FastAPI, SQLAlchemy, Supabase veya provider SDK importu YASAK.**
+2. Bir bounded context, başka bir context'in **`domain` veya `infrastructure`** katmanını **doğrudan import edemez**.
+3. Modüller arası erişim **yalnız** açık application contract, command/query veya versiyonlu integration event üzerinden.
+4. `flowpilot.api` ve `flowpilot.worker` **yalnız application sınırlarını** çağırır.
+5. **Adapter wiring yalnız composition root'ta** (`api/deps.py`, `worker/wiring.py`).
+6. **`PYTHONPATH` hack'i YASAK** — editable install (`pip install -e apps/backend`).
+7. Bounded context klasör adları **snake_case**; tireli ad YASAK (`import flowpilot.modules.workflow-runtime` bir syntax hatasıdır).
+8. **Aynı bounded context için ikinci source of truth YASAK.**
 
 ---
 
@@ -32,13 +59,37 @@ Bu kurallar **öneri değildir**. CI'da otomatik doğrulanır (bootstrap sonras�
 
 ### Yasak import örnekleri
 
+```python
+# flowpilot/modules/approval/domain/*.py içinde
+from sqlalchemy import Column                                              # ❌
+from fastapi import Depends                                                # ❌
+from supabase import create_client                                         # ❌
+
+# flowpilot/modules/notification/*.py içinde  (cross-context)
+from flowpilot.modules.approval.infrastructure.models import ApprovalRow   # ❌
+from flowpilot.modules.approval.domain.approval_step import ApprovalStep   # ❌
+
+# flowpilot/api/routers/*.py içinde  (composition root)
+from flowpilot.modules.approval.infrastructure.repository import ...       # ❌ (wiring hariç)
+from flowpilot.modules.approval.domain.policies import ...                 # ❌
+
+# apps/web (TypeScript)
+import ... from "../../apps/backend/..."                                   # ❌ sözleşme üzerinden konuşur
 ```
-modules/approval/domain/**        →  sqlalchemy            ❌
-modules/approval/domain/**        →  fastapi               ❌
-modules/approval/domain/**        →  pydantic              ❌  (DTO sınırında serbest)
-modules/approval/**               →  modules/work_management/infrastructure/**  ❌
-modules/notification/**           →  modules/approval/infrastructure/persistence/**  ❌
-apps/web/**                       →  modules/**            ❌  (sözleşme üzerinden konuşur)
+
+### İzin verilen import örnekleri
+
+```python
+# composition root → application sınırı
+from flowpilot.modules.approval.application.commands import DecideApprovalStep
+
+# domain → shared primitive
+from flowpilot.shared.money import Money
+from flowpilot.shared.clock import ClockPort
+
+# infrastructure → kendi application port'u + dış SDK
+from flowpilot.modules.approval.application.ports import ApprovalRepository
+from sqlalchemy.orm import Session
 ```
 
 ---
@@ -65,26 +116,26 @@ flowchart TD
     IDENTITY[identity] --> SHARED[shared]
     ORG[organization] --> IDENTITY
     AUTHZ[authorization] --> ORG
-    WFDESIGN[workflow-design] --> AUTHZ
-    WFRUNTIME[workflow-runtime] --> WFDESIGN
+    WFDESIGN[workflow_design] --> AUTHZ
+    WFRUNTIME[workflow_runtime] --> WFDESIGN
     APPROVAL[approval] --> AUTHZ
-    WORK[work-management] --> AUTHZ
-    PURCHASE[purchase-request] --> WFDESIGN
+    WORK[work_management] --> AUTHZ
+    PURCHASE[purchase_request] --> WFDESIGN
     DOC[document] --> AUTHZ
     NOTIFY[notification] --> SHARED
     AUDIT[audit] --> SHARED
     ANALYTICS[analytics] --> SHARED
 ```
 
-- `workflow-runtime`, `approval` ve `work-management`'a **event/komut üzerinden** ulaşır — doğrudan import ile değil.
-- `notification`, `audit` ve `analytics` **hiçbir iş modülünü import etmez**; yalnız event tüketir. Bu, onları ileride servis olarak ayırmayı mümkün kılar.
-- `shared` paketi **hiçbir modüle bağımlı değildir**.
+- `workflow_runtime`, `approval` ve `work_management`'a **event/komut üzerinden** ulaşır — doğrudan import ile değil.
+- `notification`, `audit` ve `analytics` **hiçbir iş modülünü import etmez**; yalnız event tüketir. Bu, onları ileride servis olarak ayırmayı mümkün kılar (ADR-009 §Future service extraction).
+- `flowpilot.shared` **hiçbir bounded context'e bağımlı değildir**.
 
 ---
 
-## 3. `shared` paketi kuralı
+## 3. `flowpilot.shared` paketi kuralı
 
-`shared` yalnızca şunları barındırır:
+`flowpilot.shared` yalnızca şunları barındırır:
 
 - Primitive value object'ler (`Money`, `TenantId`, `UserId`, `Ulid`)
 - Error base sınıfları ve error catalog sözleşmesi
@@ -92,7 +143,9 @@ flowchart TD
 - `IdGenerator` port'u
 - Telemetry (log/metric/trace) sözleşmeleri
 
-**YASAK:** İş kuralı, entity, use case, repository, "yardımcı" fonksiyon çöplüğü. `shared` bir domain modülü değildir.
+**YASAK:** İş kuralı, entity, use case, repository, "yardımcı" fonksiyon çöplüğü. `flowpilot.shared` bir domain modülü değildir.
+
+> `shared`, `observability` ve `config` **ayrı Python distribution DEĞİLDİR** — `flowpilot`'ın alt paketleridir (ADR-009).
 
 ---
 
@@ -102,12 +155,13 @@ Dış dünyaya açılan her yetenek port arkasındadır:
 
 | Port | Katman | MVP adapter'ı |
 |---|---|---|
-| `AuthProviderPort` | application | Fake adapter (gerçek provider **kararı açık** — ADR-005) |
-| `WorkflowRuntimePort` | application | Custom PostgreSQL-backed runtime (**spike şartına bağlı** — ADR-004) |
-| `FileStoragePort` | application | S3-compatible; local development MinIO adayı |
-| `NotificationChannelPort` | application | In-app kanal |
-| `ClockPort` | shared | System clock / fake clock |
-| `IdGeneratorPort` | shared | ULID generator |
+| `AuthProviderPort` | `flowpilot.modules.identity.application` | **Supabase adapter** + fake adapter (ADR-005) |
+| `WorkflowRuntimePort` | `flowpilot.modules.workflow_runtime.application` | Custom PostgreSQL-backed runtime (**spike şartına bağlı** — ADR-004) |
+| `FileStoragePort` | `flowpilot.modules.document.application` | S3-compatible; local development MinIO adayı |
+| `MalwareScanPort` | `flowpilot.modules.document.application` | MVP'de yalnız no-op/stub (gerçek tarama: pilot-ready) |
+| `NotificationChannelPort` | `flowpilot.modules.notification.application` | In-app kanal (kanal-nötr port; e-posta pilot-ready) |
+| `ClockPort` | `flowpilot.shared` | System clock / fake clock |
+| `IdGeneratorPort` | `flowpilot.shared` | ULID generator |
 
 **Kurallar:**
 
@@ -132,8 +186,10 @@ Bootstrap (Epic E00) sonrasında CI aşağıdakileri doğrular. Herhangi biri k�
 
 | # | Kontrol | Başarısızlık anlamı |
 |---|---|---|
-| FF-01 | `domain/**` içinde `sqlalchemy`, `fastapi`, provider SDK importu yok | Katman ihlali |
-| FF-02 | Modül A'nın `infrastructure/persistence`'ı modül B tarafından import edilmiyor | Sahiplik ihlali |
+| FF-01 | `flowpilot/modules/*/domain/**` içinde `sqlalchemy`, `fastapi`, `supabase` veya provider SDK importu yok | Katman ihlali |
+| FF-02 | `flowpilot.modules.X.*` içinde `flowpilot.modules.Y.domain` veya `.infrastructure` importu yok (X ≠ Y) | Sahiplik ihlali |
+| FF-02b | `flowpilot.api` / `flowpilot.worker` içinde `flowpilot.modules.*.domain` veya `.infrastructure` importu yok (wiring dosyaları hariç) | İş mantığı composition root'a sızmış |
+| FF-02c | Bounded context klasör adları snake_case; tireli ad yok | Python import yolu geçersiz |
 | FF-03 | Tenant verisi taşıyan her tabloda `tenant_id` var (whitelist dışında) | Tenant izolasyon riski |
 | FF-04 | Tenant verisi taşıyan her tabloda RLS politikası tanımlı | Tenant izolasyon riski |
 | FF-05 | Mutasyona açık her aggregate'te optimistic concurrency alanı var | Yarış koşulu riski |

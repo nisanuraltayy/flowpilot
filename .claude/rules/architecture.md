@@ -1,11 +1,26 @@
 # Mimari Kuralları
 
-Bağlayıcı kaynak: PRD §11, §35, §38, §39 ve kabul edilmiş ADR'ler.
+Bağlayıcı kaynak: PRD §11, §35, §38, §39 ve kabul edilmiş ADR'ler ([ADR-003](../../docs/adr/ADR-003-modular-monolith.md), [ADR-009](../../docs/adr/ADR-009-python-physical-layout.md)).
+
+## 0. Fiziksel yerleşim (ADR-009)
+
+Tek Python distribution: **`flowpilot-backend`** (`apps/backend`), tek import kökü **`flowpilot`**.
+
+```text
+apps/backend/src/flowpilot/
+├── shared/ observability/ config/       # ayrı distribution DEĞİL
+├── modules/<snake_case>/                # 13 bounded context
+│   └── domain/ application/ infrastructure/ presentation/
+├── api/                                 # composition root — İŞ MANTIĞI YOK
+└── worker/                              # composition root — İŞ MANTIĞI YOK
+```
+
+Bounded context klasör adları **snake_case**'dir; tireli ad Python import yolunda **kullanılamaz**.
 
 ## 1. Katman ve bağımlılık yönü
 
 ```
-presentation (FastAPI router / Next.js route)
+presentation (FastAPI router / event consumer)
       ↓
 application (command, query, handler, port)
       ↓
@@ -16,31 +31,50 @@ infrastructure (persistence, messaging, provider adapter) — portları IMPLEMEN
 
 **MUST NOT:**
 
-- Domain katmanı FastAPI, SQLAlchemy, Pydantic-as-ORM, Next.js veya herhangi bir provider SDK'sına doğrudan bağımlı olamaz.
+- **Domain katmanında FastAPI, SQLAlchemy, Supabase veya herhangi bir provider SDK importu YASAK:**
+  ```python
+  # flowpilot/modules/approval/domain/*.py içinde:
+  from sqlalchemy import Column     # YASAK
+  from fastapi import Depends       # YASAK
+  ```
 - Infrastructure tipleri (ORM modeli, SDK response objesi, HTTP request objesi) domain'e sızamaz.
-- Application katmanı somut adapter'a değil, porta bağımlıdır.
+- Application katmanı somut adapter'a değil, **porta** bağımlıdır.
 
 **MUST:**
 
-- Domain, ihtiyaç duyduğu her dış yeteneği bir **port** (interface/protocol) olarak tanımlar; infrastructure bu portu uygular.
-- Zaman `Clock` abstraction'ı ile alınır; domain içinde doğrudan sistem saati okunmaz.
+- Domain, ihtiyaç duyduğu her dış yeteneği bir **port** (protocol/interface) olarak tanımlar; infrastructure bu portu uygular.
+- Zaman `ClockPort` ile alınır; domain içinde doğrudan sistem saati okunmaz.
 - ID üretimi injectable generator üzerinden yapılır; domain içinde doğrudan random ID üretilmez.
 
 ## 2. Modül sınırları
 
-Bounded context'ler (PRD §35.1): `identity`, `organization`, `authorization`, `workflow-design`, `workflow-runtime`, `work-management`, `approval`, `notification`, `document`, `audit`, `analytics`.
+Bounded context'ler (snake_case): `identity`, `organization`, `authorization`, `workflow_design`, `workflow_runtime`, `work_management`, `approval`, `purchase_request`, `document`, `notification`, `audit`, `analytics`, `platform`.
 
 **MUST NOT:**
 
+- Bir bounded context, başka bir context'in **`domain` veya `infrastructure`** katmanını **doğrudan import edemez**:
+  ```python
+  # flowpilot/modules/notification/... içinde:
+  from flowpilot.modules.approval.infrastructure.models import ApprovalStepRow   # YASAK
+  from flowpilot.modules.approval.domain.approval_step import ApprovalStep       # YASAK
+  ```
 - Bir modül başka bir modülün tablosuna **doğrudan yazamaz**.
-- Bir modül başka modülün persistence modelini import edemez.
-- `shared`/`common` paketi domain çöplüğüne dönüşemez. İçinde yalnız primitive, error base, ID, `Clock` ve telemetry sözleşmeleri bulunur.
+- `flowpilot.shared` domain çöplüğüne dönüşemez. İçinde yalnız primitive, error base, ID, `ClockPort` ve telemetry sözleşmeleri bulunur.
+- **`PYTHONPATH` hack'i YASAK** — paket editable install ile çözülür (`pip install -e apps/backend`).
+- **Aynı bounded context için ikinci bir source of truth oluşturulamaz.**
 
 **MUST:**
 
 - Cross-module **okuma**: açık application contract veya read model üzerinden.
-- Cross-module **yazma**: command API veya integration event üzerinden.
+- Cross-module **yazma**: command API veya versiyonlu integration event üzerinden.
 - İç domain event'i doğrudan modül sınırı dışına yayınlanmaz; versiyonlu integration event'e dönüştürülür.
+
+## 2b. Composition root sınırı
+
+`flowpilot.api` ve `flowpilot.worker` — **ayrı Python projeleri değil**, aynı distribution'ın iki entrypoint'i. İkisi de aynı domain/application kodunu kullanır.
+
+**MUST NOT:** İçlerinde iş mantığı bulunamaz (yetki kararı, koşul değerlendirmesi, onay sırası, state transition).
+**MUST:** Yalnız `flowpilot.modules.*.application` sınırlarını çağırırlar. **Adapter wiring yalnız burada** yapılır (`api/deps.py`, `worker/wiring.py`).
 
 ## 3. Port / adapter zorunluluğu
 

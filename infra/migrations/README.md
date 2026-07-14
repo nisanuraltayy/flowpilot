@@ -1,25 +1,20 @@
-# infra/migrations — Veritabanı Migration'ları (Alembic)
+# infra/migrations — (kullanılmıyor)
 
-## Zorunlu sıra: Expand → Deploy → Backfill → Switch → Verify → Contract
+> ⛔ **Migration'lar BURADA DEĞİL.**
+>
+> Tek migration history: **`apps/backend/migrations/`** + `apps/backend/alembic.ini`
+> Karar: [ADR-009](../../docs/adr/ADR-009-python-physical-layout.md)
 
-1. **Expand** — yeni nullable kolon/tablo/index ekle
-2. **Deploy** — eski ve yeni şema ile çalışan kod
-3. **Backfill** — tekrarlanabilir, chunk'lı, gözlemlenebilir job (**web request içinde backfill YASAK**)
-4. **Switch** — kontrollü rollout
-5. **Verify** — count, checksum, business invariant kontrolü
-6. **Contract** — eski kolon/constraint **sonraki** release'te kaldırılır
+## Neden burada değil
 
-## Kurallar
+Alembic, backend Python distribution'ının bir parçasıdır: `env.py` uygulama modellerini ve `DATABASE_URL` konfigürasyonunu import eder. Migration'ları backend'in dışına koymak, ya bir import hack'i ya da ikinci bir konfigürasyon kopyası gerektirir.
 
-- **Her tenant tablosu `tenant_id` içerir** (FF-03) ve **RLS politikası olmadan merge edilemez** (FF-04). Migration politikayı da versiyonlar.
-- Migration production'da **uzun table lock yaratmaz**. Büyük index `CONCURRENTLY` oluşturulur.
-- **Migration dosyası silinip yeniden üretilmez.**
-- **Migration ile veri silme agent'in bağımsız kararı DEĞİLDİR** — owner onayı gerekir.
-- Forward-only davranır; rollback planı application rollback + forward fix'tir.
-- CI'da **boş DB** ve **bir önceki release şeması** üzerinde test edilir.
-- Seed ve fixture ayrılır; **production verisi seed'e gömülmez**.
-- Destructive migration tek deploy'da yapılmaz.
+**Bu dizin ikinci bir source of truth OLAMAZ.** İki migration history, aynı veritabanı üzerinde sıralanamayan bağımsız zincirler üretir — foreign key'ler ve RLS politikaları modüller arası bir sıra zorunluluğu doğurduğu için bu, sessizce bozulan bir düzendir.
+
+## Migration kuralları
+
+Kurallar (expand → deploy → backfill → switch → verify → contract, RLS zorunluluğu, forward-only) [.claude/rules/database.md](../../.claude/rules/database.md) §8'de tanımlıdır ve `apps/backend/migrations/` için geçerlidir.
 
 ## Durum
 
-Boş. Migration **henüz oluşturulmadı**. İlk migration, backend scaffold'dan sonra gelir.
+Boş ve boş kalacak. `infra/` yalnız [container tanımlarını](../containers/README.md) barındırır.

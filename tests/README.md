@@ -1,21 +1,28 @@
-# tests/ — Modül Sınırını Aşan Testler
+# tests/ — Uygulama Sınırını Aşan E2E Testleri
 
-Tek bir modülün içinde kalan unit ve integration testleri **o modülün kendi `tests/` klasöründedir**. Burada yalnızca **birden fazla modülü birlikte** doğrulayan testler bulunur.
+Repo kökündeki bu dizin **yalnızca web + API'yi birlikte** süren uçtan uca testleri barındırır.
 
-## Alt dizinler
-
-| Dizin | Rol |
+| Dizin | Kapsam |
 |---|---|
-| [e2e/](e2e/README.md) | Uçtan uca akış: satın alma dikey dilimi |
-| [security/](security/README.md) | Cross-tenant (IDOR/BOLA) ve negatif authorization suite'i |
+| [e2e/](e2e/README.md) | Tarayıcı akışı: Next.js UI → FastAPI → PostgreSQL → worker |
+
+## Python testleri burada DEĞİL
+
+Backend'in unit, integration, contract ve security testleri **`apps/backend/tests/`** altındadır ([ADR-009](../docs/adr/ADR-009-python-physical-layout.md)):
+
+| Test türü | Yer |
+|---|---|
+| Unit | `apps/backend/tests/unit/` |
+| Integration (PostgreSQL, RLS, outbox) | `apps/backend/tests/integration/` |
+| Contract (port fake ↔ gerçek adapter) | `apps/backend/tests/contract/` |
+| **Security (cross-tenant, negatif authz)** | `apps/backend/tests/security/` |
+
+Gerekçe: tek pytest rootdir (`apps/backend`), tek `conftest.py` hiyerarşisi. İki rootdir, iki conftest karmaşası üretir.
 
 ## Bozulamaz kurallar
 
-- **Failing test silinemez, `skip`/`xfail` ile geçilemez.** Test kırmızıysa: ya kod hatalıdır ve düzeltilir, ya da kabul kriteri hatalıdır ve **açıkça, gerekçesiyle** güncellenir.
+- **Failing test silinemez, `skip`/`xfail` ile geçilemez.**
 - **Workflow runtime e2e testte tamamen mock'lanamaz** (PRD §39 anti-pattern'i). Kritik davranışı test etmeyen bir e2e testi, test değil dekordur.
-- Tenant verisine dokunan **her** story'de cross-tenant testi zorunludur.
-- Yetki kontrolü olan **her** endpoint'te negatif authorization testi zorunludur.
-- Testler **fake clock** kullanabilmelidir; domain gerçek sistem saatine bağlı olamaz.
 - Testler birbirinden bağımsızdır; sıraya bağımlı test YASAK.
 
 ## Durum

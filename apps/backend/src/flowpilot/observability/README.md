@@ -1,4 +1,4 @@
-# packages/observability — Log, Metric, Trace
+# flowpilot.observability — Log, Metric, Trace
 
 Vendor-neutral gözlemlenebilirlik sözleşmeleri (OpenTelemetry yaklaşımı).
 

@@ -1,4 +1,4 @@
-# apps/worker — Asenkron İşlem Process'i
+# flowpilot.worker — Asenkron İşlem Process'i
 
 **Rol:** Composition root. `api`'den **ayrı bir process**'tir (ADR-003). Transactional outbox'ı tüketir, timer'ları ateşler, event handler'ları çalıştırır.
 

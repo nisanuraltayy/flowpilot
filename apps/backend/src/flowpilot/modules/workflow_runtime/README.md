@@ -5,7 +5,7 @@
 
 ## ⛔ LOCK-003 — Spike şartına bağlı
 
-**Bu modüle bağlı kalıcı üretim kodu, workflow runtime spike'ının 12/12 exit criterion'u kanıtlanmadan YAZILAMAZ** (ADR-004). Bkz. [spike planı](../../docs/architecture/workflow-runtime-spike-plan.md).
+**Bu modüle bağlı kalıcı üretim kodu, workflow runtime spike'ının 12/12 exit criterion'u kanıtlanmadan YAZILAMAZ** (ADR-004). Bkz. [spike planı](../../../../../../docs/architecture/workflow-runtime-spike-plan.md).
 
 Spike başarısız olursa Temporal yeniden değerlendirilir. `WorkflowRuntimePort` bu geçişi domain kodunu yeniden yazmadan mümkün kılmak için vardır.
 

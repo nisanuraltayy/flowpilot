@@ -30,6 +30,7 @@ Bu dizin FlowPilot'ın mimari kararlarını tutar. ADR'ler **kaynak öncelik sı
 | [ADR-006](ADR-006-postgresql-tenant-isolation.md) | Tenant izolasyonu: application scope + PostgreSQL RLS | Accepted | — |
 | [ADR-007](ADR-007-transactional-outbox.md) | Transactional outbox + PostgreSQL-backed polling worker | Accepted | LOCK-005 |
 | [ADR-008](ADR-008-monorepo.md) | Monorepo | Accepted | LOCK-008 |
+| [ADR-009](ADR-009-python-physical-layout.md) | Python fiziksel yerleşimi: tek distribution (`flowpilot-backend`), tek import kökü `flowpilot`, bounded context'ler `flowpilot.modules.*` | Accepted | — (ADR-008'i tamamlar) |
 
 ## Hâlâ açık kilitler
 
