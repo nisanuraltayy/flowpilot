@@ -63,13 +63,80 @@ SELECT set_config('app.current_tenant_id', '<tenant-uuid>', true);
 - Policy karşılaştırmaları **metin** üzerinden yapılır (`id::text = current_setting(...)`) — boş/NULL context hata değil, güvenli red üretir.
 - `UnitOfWork.set_actor_context / set_tenant_context` bu ayarları yönetir.
 
-### İlk business use-case: CreateOrganization
+### Authentication: Bearer token → Supabase JWT → internal user
 
-`flowpilot.modules.organization.application.handler.CreateOrganizationHandler`:
-tenant + aktif owner membership **aynı transaction'da** oluşur; herhangi bir adım
-başarısızsa ikisi de rollback edilir. Duplicate membership DB unique constraint'i
-ile engellenir. **Henüz HTTP endpoint'i ve Supabase auth YOKTUR** — use-case yalnız
-application katmanındadır; `POST /v1/organizations` bir sonraki aşamada bağlanacaktır.
+İlk gerçek HTTP iş akışı:
+
+```text
+Authorization: Bearer <access_token>
+  → SupabaseJwtAuthAdapter: public JWKS ile imza + exp + iat + iss + aud + sub doğrulaması
+  → EnsureAuthenticatedUser: (auth_provider, provider_subject) → internal FlowPilot UserId
+      (yoksa oluşturur; idempotent — yarış koruması DB unique constraint'indedir)
+  → CurrentActor(user_id)  → endpoint yalnız bunu görür
+```
+
+**Güvenlik kararları:**
+
+- Doğrulama **yalnız public JWKS** iledir: `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`.
+  **Service role key ve tam Supabase SDK'sı KULLANILMAZ** (yalnız `PyJWT[crypto]`).
+- Algoritma allow-list açıktır ve **yalnız asimetrik** (varsayılan `RS256,ES256`);
+  **HS256 desteklenmez** ve yapılandırılamaz. `algorithms` token header'ından alınmaz.
+- issuer = `<SUPABASE_URL>/auth/v1`, audience = `authenticated` (URL'den türetilir).
+- JWKS erişim hatası **503**'tür (invalid token = **401**'den ayrı tutulur).
+- Raw token domain/application'a taşınmaz; hiçbir log/exception'da görünmez.
+- E-posta identity DEĞİLDİR: `email_snapshot` yalnız son bilinen değerdir;
+  e-posta değişse bile aynı internal user korunur.
+- Provider `sub` internal ID olarak kullanılmaz; internal UUID ayrıdır.
+- **Not:** EnsureAuthenticatedUser, organization transaction'ından bağımsızdır.
+  Organization işlemi başarısız olursa identity eşleme kaydının kalması kabul
+  edilir ve zararsızdır (salt eşlemedir, sonraki istekte aynen kullanılır).
+
+### `POST /v1/organizations`
+
+```http
+POST /v1/organizations
+Authorization: Bearer <supabase_access_token>
+Content-Type: application/json
+
+{"name": "Acme Teknoloji"}
+```
+
+Başarılı yanıt — `201 Created` (source-of-truth transaction commit edilmiştir):
+
+```json
+{
+  "organization_id": "<uuid>",
+  "owner_membership_id": "<uuid>",
+  "name": "Acme Teknoloji"
+}
+```
+
+Tenant + aktif owner membership **aynı transaction'da** oluşur
+(`CreateOrganizationHandler`); bu endpoint transaction'ı yeniden yazmaz,
+repository'ye dokunmaz. Tenant header istemez — yeni tenant oluşturur.
+
+**Hata davranışları:**
+
+| Durum | Yanıt |
+|---|---|
+| Authorization header yok / yanlış şema / geçersiz / süresi dolmuş token | `401` + `WWW-Authenticate: Bearer` |
+| JWKS/provider geçici erişilemiyor veya Supabase yapılandırılmamış | `503` |
+| Geçersiz organizasyon adı (boş/whitespace/200+ karakter) | `422` |
+| Beklenmeyen DB hatası | `500` (detay sızdırmaz) |
+
+Health endpoint'leri authentication **istemez**.
+
+### Canlı Supabase olmadan test
+
+Adapter production-ready'dir ancak **canlı Supabase projesine karşı henüz
+doğrulanmamıştır** (elde credential yok). Testler network'süz çalışır: RSA/EC
+anahtar çiftleri test çalışma anında üretilir, JWKS bellekten servis edilir ve
+imza/exp/iss/aud/rotation/cache dahil tüm doğrulama gerçek PyJWT kod yolundan
+geçer. Canlı kabul testi için tek gereken: gerçek `SUPABASE_URL` + o projeden
+alınmış bir access token (bkz. docs/open-questions.md OQ-009).
+
+**Frontend ve login ekranları henüz yoktur** — token'ı üretecek istemci bir
+sonraki aşamada (Next.js + Supabase login) gelecektir.
 
 ### Integration testleri (Testcontainers)
 

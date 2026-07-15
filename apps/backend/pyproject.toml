@@ -25,6 +25,9 @@ dependencies = [
   "alembic>=1.14,<2.0",
   "psycopg[binary]>=3.2,<4.0",
   "structlog>=24.4,<26.0",
+  # Supabase JWT dogrulamasi: yalniz PyJWT + cryptography (JWKS/RS256/ES256).
+  # Tam supabase SDK'si BILINCLI olarak eklenmedi (ADR-005: yalniz token dogrulama).
+  "PyJWT[crypto]>=2.10,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +95,10 @@ ignore = ["S104", "RUF001", "RUF002", "RUF003"]
 # Testlerde `assert` pytest'in temel mekanizmasıdır (S101). S105/S106: test
 # dosyalarındaki fake/izole-container credential'ları gerçek secret değildir.
 "tests/**" = ["S101", "S105", "S106"]
+# N818: InvalidAccessToken / ExpiredAccessToken / AuthProviderUnavailable adları
+# owner-onaylı API sözleşmesidir (auth boundary spesifikasyonu); Error soneki
+# bilinçli olarak yoktur.
+"src/flowpilot/modules/identity/application/auth.py" = ["N818"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["flowpilot"]

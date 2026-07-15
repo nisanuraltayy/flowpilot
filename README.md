@@ -10,8 +10,6 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 
 ## ⚠️ Mevcut geliştirme durumu
 
-> **Bu repository'de henüz production kodu YOKTUR.**
-
 Şu ana kadar tamamlananlar:
 
 | Aşama | Durum |
@@ -25,16 +23,31 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 | Python fiziksel yerleşimi (ADR-009) | ✅ Tamamlandı |
 | Backend scaffold + quality tooling | ✅ Tamamlandı |
 | Local altyapı (PostgreSQL + MinIO) | ✅ Tamamlandı |
-| **Database foundation + organization creation core** | ✅ **Bu aşama** |
-| Supabase Auth + `POST /v1/organizations` | ⏳ Sıradaki |
-| Frontend scaffold | ⛔ Henüz başlamadı |
+| Database foundation + organization creation core | ✅ Tamamlandı |
+| **Supabase Auth + `POST /v1/organizations`** | ✅ **Bu aşama** |
+| Next.js frontend + Supabase login + organization formu | ⏳ Sıradaki |
 | İlk dikey dilim (satın alma) | ⛔ Henüz başlamadı |
 
-**İlk gerçek business use-case çalışır durumdadır:** `CreateOrganization` — tenant + aktif owner membership **aynı transaction'da** oluşur, PostgreSQL RLS (ENABLE + FORCE) ile tenant izolasyonu gerçek veritabanı testleriyle kanıtlanmıştır. Alembic tek migration history'si (`0001`), `flowpilot_app`/`flowpilot_migrator` rol ayrımı (ikisi de BYPASSRLS'siz) ve Testcontainers integration suite'i kuruludur.
+**İlk gerçek HTTP iş akışı çalışır durumdadır:**
 
-Repository'de bulunmayanlar (kasıtlı): **HTTP organization endpoint'i**, **Supabase entegrasyonu/authentication**, RBAC kataloğu, workflow runtime, purchase request, approval, outbox, audit, `Dockerfile`, frontend.
+```text
+Bearer access token → Supabase JWT doğrulama (public JWKS, RS256/ES256)
+  → internal FlowPilot user çözümleme/oluşturma (idempotent)
+  → POST /v1/organizations → tenant + aktif owner membership (AYNI transaction)
+  → HTTP 201
+```
 
-Domain kodu yalnız `identity` (minimal) ve `organization` modüllerindedir; diğer 11 bounded context paketi boştur.
+Tenant izolasyonu PostgreSQL RLS (ENABLE + FORCE) ile gerçek veritabanı
+testlerinde kanıtlanmıştır. Alembic history: `0001` + `0002`. Roller:
+`flowpilot_app`/`flowpilot_migrator` (ikisi de BYPASSRLS'siz). Supabase yalnız
+JWT doğrulaması için kullanılır — service role key ve Supabase SDK'sı yoktur.
+
+Repository'de bulunmayanlar (kasıtlı): frontend/login ekranları, RBAC kataloğu,
+workflow runtime, purchase request, approval, outbox, audit, `Dockerfile`.
+
+Domain kodu yalnız `identity` ve `organization` modüllerindedir; diğer 11
+bounded context paketi boştur. **Canlı Supabase projesine karşı kabul testi
+henüz yapılmadı** (credential yok) — bkz. [docs/open-questions.md](docs/open-questions.md).
 
 ---
 

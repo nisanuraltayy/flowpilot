@@ -10,6 +10,15 @@ from datetime import datetime
 from types import TracebackType
 from uuid import UUID
 
+from flowpilot.modules.identity.application.auth import (
+    AuthenticatedIdentity,
+    AuthProviderUnavailable,
+    ExpiredAccessToken,
+    InvalidAccessToken,
+)
+from flowpilot.modules.identity.application.errors import DuplicateProviderIdentityError
+from flowpilot.modules.identity.domain.auth_provider import AuthProvider
+from flowpilot.modules.identity.domain.user import User
 from flowpilot.modules.organization.domain.membership import Membership
 from flowpilot.modules.organization.domain.organization import Organization
 from flowpilot.shared.identifiers import UserId
@@ -55,6 +64,90 @@ class FakeOrganizationRepository:
         if self._fail_on_membership:
             raise RuntimeError("simulated membership persist failure")
         self.memberships.append(membership)
+
+
+class FakeAuthProvider:
+    """Token -> AuthenticatedIdentity eşlemesi; bilinmeyen token InvalidAccessToken.
+
+    `expired_tokens` içindeki token ExpiredAccessToken; `unavailable=True` ise her
+    çağrı AuthProviderUnavailable fırlatır.
+    """
+
+    def __init__(
+        self,
+        identities: dict[str, AuthenticatedIdentity] | None = None,
+        *,
+        expired_tokens: Iterable[str] = (),
+        unavailable: bool = False,
+    ) -> None:
+        self._identities = identities or {}
+        self._expired = set(expired_tokens)
+        self._unavailable = unavailable
+
+    def verify_token(self, access_token: str) -> AuthenticatedIdentity:
+        if self._unavailable:
+            raise AuthProviderUnavailable()
+        if access_token in self._expired:
+            raise ExpiredAccessToken()
+        try:
+            return self._identities[access_token]
+        except KeyError:
+            raise InvalidAccessToken() from None
+
+
+class FakeUserRepository:
+    """EnsureAuthenticatedUser testleri için in-memory kullanıcı deposu."""
+
+    def __init__(self, *, race_inserts: Iterable[User] = ()) -> None:
+        self.users: list[User] = []
+        # add() çağrıldığında "yarışı kaybetme" simülasyonu: bu kullanıcılar
+        # sanki başka bir istek tarafından o anda insert edilmiş gibi belirir.
+        self._race_inserts = list(race_inserts)
+        self.add_attempts = 0
+
+    def add(self, user: User) -> None:
+        self.add_attempts += 1
+        if self._race_inserts:
+            self.users.extend(self._race_inserts)
+            self._race_inserts = []
+            raise DuplicateProviderIdentityError()
+        self.users.append(user)
+
+    def exists(self, user_id: UserId) -> bool:
+        return any(u.id == user_id for u in self.users)
+
+    def find_by_provider_identity(
+        self, provider: AuthProvider, provider_subject: str
+    ) -> User | None:
+        for u in self.users:
+            if u.auth_provider == provider and u.provider_subject == provider_subject:
+                return u
+        return None
+
+
+class FakeIdentityUnitOfWork:
+    def __init__(self, repository: FakeUserRepository) -> None:
+        self.users = repository
+        self.committed = 0
+        self.rolled_back = 0
+
+    def __enter__(self) -> FakeIdentityUnitOfWork:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        if exc_type is not None:
+            self.rolled_back += 1
+
+    def commit(self) -> None:
+        self.committed += 1
+
+    def rollback(self) -> None:
+        self.rolled_back += 1
 
 
 class FakeUnitOfWork:

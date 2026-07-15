@@ -79,4 +79,5 @@ class CreateOrganizationHandler:
         return CreateOrganizationResult(
             tenant_id=tenant_id.value,
             owner_membership_id=membership_id.value,
+            organization_name=name.value,
         )

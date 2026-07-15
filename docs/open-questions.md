@@ -12,6 +12,7 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 | OQ-003 | Repository bootstrap yürütme onayı | — | Yüksek | 🟡 **Prensipte onaylandı — komut bekleniyor** |
 | OQ-004 | Onay eşiklerinin gerçek müşteride doğrulanması | — | Düşük | 🟡 **Geçici varsayım olarak kaydedildi** |
 | OQ-008 | AI provider ve veri politikası | LOCK-007 | Düşük | 🔴 Açık (MVP dışı — aciliyet yok) |
+| OQ-009 | Canlı Supabase kabul testi | — | Orta | 🔴 **Açık — credential bekleniyor; frontend/login aşamasında kapanır** |
 | OQ-001 | Auth provider | LOCK-004 | — | ✅ **KAPANDI — Supabase Auth** |
 | OQ-005 | PRD MVP listesi ile gerçek MVP kapsamı farkı | — | — | ✅ **KAPANDI** |
 | OQ-006 | E-posta bildirimi | — | — | ✅ **KAPANDI — pilot-ready** |
@@ -33,6 +34,31 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 **Karar verilene kadar agent ne yapar:** Deployment **provider-neutral** kalır (Docker tabanlı). Sağlayıcıya özgü manifest, buildpack veya SDK eklenmez.
 
 **MVP'yi bloke eder mi:** Hayır. Local MVP tamamen local çalışır. Pilot-ready öncesinde karar gerekir.
+
+---
+
+### OQ-009 — Canlı Supabase kabul testi
+
+**Durum:** 🔴 Açık — gerçek Supabase projesi/credential bekleniyor
+
+**Tespit:** `SupabaseJwtAuthAdapter` production-ready yazıldı ve network'süz
+testlerle (runtime'da üretilen RSA/EC anahtarları + lokal JWKS) imza, exp, iss,
+aud, sub, algoritma allow-list, HS256 reddi, key rotation ve cache dahil
+kapsamlı doğrulandı. Ancak **canlı bir Supabase projesine karşı uçtan uca kabul
+testi henüz YAPILMADI** — elde gerçek proje URL'i ve access token yok.
+
+**Gereken:** Bir Supabase projesi oluşturulduğunda:
+1. `.env` içine gerçek `SUPABASE_URL` yazılır.
+2. O projeden bir kullanıcıyla access token alınır (frontend login aşaması bunu
+   doğal olarak sağlayacak).
+3. `POST /v1/organizations` gerçek token ile çağrılır; 201 + doğru claim
+   eşlemesi doğrulanır.
+
+**Risk:** Düşük-orta. JWKS formatı ve claim yapısı Supabase dokümantasyonuna
+göre kodlandı; en olası sapma noktaları issuer/audience varsayılanlarıdır ve
+ikisi de yapılandırılabilir.
+
+**Zamanlama:** Frontend + Supabase login aşamasında doğal olarak kapanır.
 
 ---
 

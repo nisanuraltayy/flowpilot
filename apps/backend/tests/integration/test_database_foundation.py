@@ -62,8 +62,9 @@ def _add_user(session_factory: sessionmaker[Session], user_id: UUID) -> None:
         SqlAlchemyUserRepository(session).add(
             User(
                 id=UserId(user_id),
-                email="actor@example.com",
-                external_auth_subject=None,
+                auth_provider=None,
+                provider_subject=None,
+                email_snapshot="actor@example.com",
                 created_at=datetime.now(UTC),
             )
         )

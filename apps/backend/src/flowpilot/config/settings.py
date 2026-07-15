@@ -49,6 +49,37 @@ class Settings(BaseSettings):
     # Migration bağlantısı: DDL yetkili `flowpilot_migrator` rolü — app'ten AYRI.
     migration_database_url: SecretStr | None = None
 
+    # --- Supabase Auth (ADR-005 — YALNIZ JWT doğrulama) ---
+    # Public proje URL'i — secret DEĞİLDİR (SecretStr yapılmaz). JWKS URL'i ve
+    # issuer bundan türetilir. SERVICE ROLE KEY ve JWT SECRET BİLİNÇLİ OLARAK
+    # YOKTUR: doğrulama yalnız public JWKS iledir.
+    supabase_url: str | None = None
+    supabase_jwt_audience: str = "authenticated"
+    # Virgülle ayrılmış allow-list; yalnız asimetrik algoritmalar (HS* reddedilir).
+    supabase_jwt_allowed_algorithms: str = "RS256,ES256"
+    supabase_jwks_cache_seconds: int = Field(default=300, ge=1)
+    supabase_jwks_timeout_seconds: float = Field(default=5.0, gt=0)
+
+    @property
+    def supabase_issuer(self) -> str | None:
+        """JWT issuer: <SUPABASE_URL>/auth/v1 (URL'den güvenli türetilir)."""
+        if self.supabase_url is None:
+            return None
+        return f"{self.supabase_url.rstrip('/')}/auth/v1"
+
+    @property
+    def supabase_jwks_url(self) -> str | None:
+        """Public JWKS adresi: <issuer>/.well-known/jwks.json."""
+        issuer = self.supabase_issuer
+        return f"{issuer}/.well-known/jwks.json" if issuer else None
+
+    @property
+    def supabase_allowed_algorithms(self) -> tuple[str, ...]:
+        """Virgülle ayrılmış algoritma listesini normalize eder."""
+        return tuple(
+            item.strip() for item in self.supabase_jwt_allowed_algorithms.split(",") if item.strip()
+        )
+
     def require_database_url(self) -> str:
         """Uygulama bağlantı dizesini döndürür; yoksa anlaşılır hata verir."""
         if self.database_url is None:
