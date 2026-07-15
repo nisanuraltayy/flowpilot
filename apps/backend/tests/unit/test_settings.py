@@ -98,3 +98,34 @@ def test_repr_masks_secret_fields() -> None:
 
     assert "super-secret-value" not in rendered
     assert "**********" in rendered
+
+
+# _env_file=None: repo kökündeki local .env'i yok sayar — testler ortamdan izole.
+
+
+def test_database_urls_default_to_none() -> None:
+    s = Settings(_env_file=None)
+    assert s.database_url is None
+    assert s.migration_database_url is None
+
+
+def test_require_database_url_raises_when_missing() -> None:
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        Settings(_env_file=None).require_database_url()
+
+
+def test_require_migration_database_url_raises_when_missing() -> None:
+    with pytest.raises(RuntimeError, match="MIGRATION_DATABASE_URL"):
+        Settings(_env_file=None).require_migration_database_url()
+
+
+def test_database_url_is_secret_and_masked(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret_url = "postgresql+psycopg://flowpilot_app:top-secret@localhost:5432/flowpilot"
+    monkeypatch.setenv("DATABASE_URL", secret_url)
+
+    s = Settings()
+
+    assert s.require_database_url() == secret_url
+    assert isinstance(s.database_url, SecretStr)
+    # Parola repr'de görünmemeli.
+    assert "top-secret" not in repr(s)

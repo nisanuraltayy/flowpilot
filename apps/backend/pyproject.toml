@@ -89,8 +89,9 @@ select = [
 ignore = ["S104", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.per-file-ignores]
-# Testlerde `assert` pytest'in temel mekanizmasıdır (S101).
-"tests/**" = ["S101"]
+# Testlerde `assert` pytest'in temel mekanizmasıdır (S101). S105/S106: test
+# dosyalarındaki fake/izole-container credential'ları gerçek secret değildir.
+"tests/**" = ["S101", "S105", "S106"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["flowpilot"]
@@ -118,6 +119,8 @@ pretty = true
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `tests` paketini import edilebilir kılar (fakes, _support). rootdir = apps/backend.
+pythonpath = ["."]
 addopts = [
   "--strict-markers",
   "--strict-config",
@@ -127,8 +130,16 @@ addopts = [
 ]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
-# Uyarılar gizlenmez — hataya çevrilir.
-filterwarnings = ["error"]
+markers = [
+  "integration: gerçek PostgreSQL (Docker/Testcontainers) gerektirir; Docker yoksa HATA verir, atlanmaz",
+]
+# Uyarılar gizlenmez — hataya çevrilir. Üçüncü-parti (testcontainers/docker/psycopg)
+# kaynaklı, düzeltemediğimiz DeprecationWarning'ler dar kapsamda tolere edilir.
+filterwarnings = [
+  "error",
+  "ignore::DeprecationWarning:testcontainers",
+  "ignore::DeprecationWarning:docker",
+]
 
 [tool.coverage.run]
 source = ["flowpilot"]

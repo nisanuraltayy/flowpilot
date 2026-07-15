@@ -3,13 +3,13 @@
 Kurallar (ADR-009, .claude/rules/security.md):
 - Ayarlar environment değişkenlerinden yüklenir.
 - Import sırasında gerçek secret ZORUNLU DEĞİLDİR; uygulama local ve test
-  ortamında secret olmadan import edilebilir.
+  ortamında secret olmadan import edilebilir. Bu yüzden database URL alanları
+  Optional'dır (None default) — eksiklerse `require_*` yardımcıları anlaşılır
+  hata verir.
 - MUTABLE GLOBAL SETTINGS NESNESİ YOKTUR. Erişim `get_settings()` üzerindendir.
 - `Settings` frozen'dır; bir kez oluşturulur, değiştirilemez.
-- Secret alanları ileride `SecretStr` ile eklenir; `model_config` bu yüzden
-  repr/log sızıntısına karşı şimdiden güvenlidir (bkz. tests/unit/test_settings.py).
-
-Bu aşamada PostgreSQL, Supabase ve object storage ayarları BİLİNÇLİ OLARAK YOKTUR.
+- Secret alanları `SecretStr`'dir; repr/log'da maskelenir.
+- Import sırasında hiçbir database bağlantısı açılmaz.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "test", "development", "staging", "production"]
@@ -35,12 +35,37 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    # --- Uygulama ---
     app_name: str = "FlowPilot"
     app_environment: Environment = "local"
     app_debug: bool = False
     log_level: LogLevel = "info"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
+
+    # --- Database (Optional — import/secret zorunluluğu yok) ---
+    # Uygulama bağlantısı: BYPASSRLS'siz `flowpilot_app` rolü (ADR-006).
+    database_url: SecretStr | None = None
+    # Migration bağlantısı: DDL yetkili `flowpilot_migrator` rolü — app'ten AYRI.
+    migration_database_url: SecretStr | None = None
+
+    def require_database_url(self) -> str:
+        """Uygulama bağlantı dizesini döndürür; yoksa anlaşılır hata verir."""
+        if self.database_url is None:
+            raise RuntimeError(
+                "DATABASE_URL tanimli degil. Repo kokunde .env olusturun "
+                "(.env.example §2). Uygulama rolu: flowpilot_app (BYPASSRLS yok)."
+            )
+        return self.database_url.get_secret_value()
+
+    def require_migration_database_url(self) -> str:
+        """Migration bağlantı dizesini döndürür; yoksa anlaşılır hata verir."""
+        if self.migration_database_url is None:
+            raise RuntimeError(
+                "MIGRATION_DATABASE_URL tanimli degil. Repo kokunde .env olusturun "
+                "(.env.example §2). Migration rolu: flowpilot_migrator."
+            )
+        return self.migration_database_url.get_secret_value()
 
 
 @lru_cache(maxsize=1)

@@ -24,16 +24,17 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 | Repository foundation bootstrap | ✅ Tamamlandı |
 | Python fiziksel yerleşimi (ADR-009) | ✅ Tamamlandı |
 | Backend scaffold + quality tooling | ✅ Tamamlandı |
-| **Local altyapı (PostgreSQL + MinIO)** | ✅ **Bu aşama** |
-| PostgreSQL database foundation / Alembic | ⏳ Sıradaki |
+| Local altyapı (PostgreSQL + MinIO) | ✅ Tamamlandı |
+| **Database foundation + organization creation core** | ✅ **Bu aşama** |
+| Supabase Auth + `POST /v1/organizations` | ⏳ Sıradaki |
 | Frontend scaffold | ⛔ Henüz başlamadı |
 | İlk dikey dilim (satın alma) | ⛔ Henüz başlamadı |
 
-**Backend scaffold çalışır durumdadır** ancak **hiçbir iş özelliği içermez**: yalnız health endpoint'leri, worker `--check` doğrulaması, ayar yönetimi ve kalite araçları (pytest, Ruff, mypy strict, import-linter, AST boundary check).
+**İlk gerçek business use-case çalışır durumdadır:** `CreateOrganization` — tenant + aktif owner membership **aynı transaction'da** oluşur, PostgreSQL RLS (ENABLE + FORCE) ile tenant izolasyonu gerçek veritabanı testleriyle kanıtlanmıştır. Alembic tek migration history'si (`0001`), `flowpilot_app`/`flowpilot_migrator` rol ayrımı (ikisi de BYPASSRLS'siz) ve Testcontainers integration suite'i kuruludur.
 
-Repository'de bulunmayanlar (kasıtlı): database bağlantısı, SQLAlchemy modeli, migration, `alembic.ini`, tenant/RLS, Supabase entegrasyonu, authentication, workflow runtime, outbox, `Dockerfile`, `docker-compose.yml`, frontend.
+Repository'de bulunmayanlar (kasıtlı): **HTTP organization endpoint'i**, **Supabase entegrasyonu/authentication**, RBAC kataloğu, workflow runtime, purchase request, approval, outbox, audit, `Dockerfile`, frontend.
 
-**13 bounded context paketi boştur** — içlerinde production business logic yoktur.
+Domain kodu yalnız `identity` (minimal) ve `organization` modüllerindedir; diğer 11 bounded context paketi boştur.
 
 ---
 

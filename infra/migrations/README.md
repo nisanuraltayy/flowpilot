@@ -18,3 +18,7 @@ Kurallar (expand → deploy → backfill → switch → verify → contract, RLS
 ## Durum
 
 Boş ve boş kalacak. `infra/` yalnız [container tanımlarını](../containers/README.md) barındırır.
+
+Gerçek migration history artık **`apps/backend/migrations/versions/`** altındadır
+(ilk revision: `0001` — identity + organization tabloları ve RLS policy'leri).
+Komutlar: [apps/backend/README.md](../../apps/backend/README.md).

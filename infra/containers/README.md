@@ -97,6 +97,20 @@ Compose healthcheck'leri: PostgreSQL `pg_isready`, MinIO `/minio/health/live`. �
 - **Container sertleştirmesi:** `no-new-privileges:true`; `privileged`, host network, Docker socket mount, ek capability **yok**.
 - **`.env` asla commit edilmez** (`.gitignore`).
 
-## Bu aşamada YOK
+## Servisler ayaktayken: roller ve migration
 
-Schema, tablo, extension, RLS policy, application role, init SQL script, migration, `alembic.ini`, bucket, access policy, presigned URL, SDK kodu, uygulama bağlantısı — **hiçbiri**. Yalnızca iki boş servis ayakta.
+Database foundation aşamasıyla birlikte roller ve şema **artık script/migration ile kurulur**:
+
+```powershell
+# Rolleri provision et (flowpilot_migrator + flowpilot_app; idempotent)
+.\.venv\Scripts\python.exe scripts/provision_local_database.py
+
+# Migration'ları uygula (flowpilot_migrator rolüyle)
+.\.venv\Scripts\python.exe -m alembic -c apps/backend/alembic.ini upgrade head
+```
+
+Rol ayrımı ve RLS ayrıntısı: [apps/backend/README.md](../../apps/backend/README.md).
+
+## Bu aşamada hâlâ YOK
+
+MinIO bucket, access policy, presigned URL/SDK kodu, uygulamanın MinIO bağlantısı, HTTP endpoint'leri, Dockerfile/backend image — **hiçbiri**.

@@ -21,15 +21,63 @@ python -m venv .venv
 
 Editable install (`-e`) sayesinde `flowpilot` paketi doğrudan `apps/backend/src`'ten çözülür. **`PYTHONPATH` hack'i kullanılmaz** (ADR-009).
 
-### Local altyapı
-
-Integration testleri (henüz yok) gerçek PostgreSQL ve MinIO gerektirecek. Local servisler ayrı bir Compose projesiyle çalışır — uygulama **henüz bağlanmaz**:
+### Local altyapı ve database foundation
 
 ```powershell
+# 1) Servisleri başlat (PostgreSQL + MinIO)
 docker compose --env-file .env -f infra/containers/compose.yaml up -d
+
+# 2) Rolleri provision et (idempotent; LOCAL DEVELOPMENT aracı)
+.\.venv\Scripts\python.exe scripts/provision_local_database.py
+
+# 3) Migration'ları uygula
+.\.venv\Scripts\python.exe -m alembic -c apps/backend/alembic.ini upgrade head
+
+# Durum / geri alma
+.\.venv\Scripts\python.exe -m alembic -c apps/backend/alembic.ini current
+.\.venv\Scripts\python.exe -m alembic -c apps/backend/alembic.ini downgrade -1
 ```
 
 PostgreSQL `localhost:5432`, MinIO `localhost:9000` (API) / `localhost:9001` (console). Ayrıntı: [infra/containers/README.md](../../infra/containers/README.md).
+
+### Database rol ayrımı (ADR-006)
+
+| Rol | Amaç | Yetkiler |
+|---|---|---|
+| `flowpilot_admin` | Bootstrap superuser — **yalnız provisioning** | superuser (container zorunluluğu) |
+| `flowpilot_migrator` | Alembic DDL (`MIGRATION_DATABASE_URL`) | NOSUPERUSER, **NOBYPASSRLS**, NOCREATEDB, NOCREATEROLE + şemada CREATE |
+| `flowpilot_app` | Uygulama DML (`DATABASE_URL`) | NOSUPERUSER, **NOBYPASSRLS**, NOCREATEDB, NOCREATEROLE + yalnız DML grant'ları |
+
+**Uygulama `flowpilot_admin` ile ASLA bağlanmaz.** Tenant tablolarında RLS `ENABLE` **+ `FORCE`**'tur — FORCE, tablo sahibinin (migrator) bile RLS'i bypass edememesini sağlar (testle kanıtlı).
+
+### RLS transaction context'i
+
+Tenant scope, PostgreSQL **transaction-local** ayarlarla taşınır ve transaction bitince otomatik sıfırlanır (bağlantı havuzuna sızmaz):
+
+```sql
+SELECT set_config('app.current_actor_id',  '<user-uuid>',   true);
+SELECT set_config('app.current_tenant_id', '<tenant-uuid>', true);
+```
+
+- Context YOKSA erişim **varsayılan olarak reddedilir** (0 satır).
+- Policy karşılaştırmaları **metin** üzerinden yapılır (`id::text = current_setting(...)`) — boş/NULL context hata değil, güvenli red üretir.
+- `UnitOfWork.set_actor_context / set_tenant_context` bu ayarları yönetir.
+
+### İlk business use-case: CreateOrganization
+
+`flowpilot.modules.organization.application.handler.CreateOrganizationHandler`:
+tenant + aktif owner membership **aynı transaction'da** oluşur; herhangi bir adım
+başarısızsa ikisi de rollback edilir. Duplicate membership DB unique constraint'i
+ile engellenir. **Henüz HTTP endpoint'i ve Supabase auth YOKTUR** — use-case yalnız
+application katmanındadır; `POST /v1/organizations` bir sonraki aşamada bağlanacaktır.
+
+### Integration testleri (Testcontainers)
+
+`apps/backend/tests/integration/` gerçek PostgreSQL'i **Testcontainers** ile ayağa
+kaldırır — local development veritabanına **dokunmaz**. Docker yoksa testler
+HATA verir, sessizce geçmez. Kapsam: migration upgrade/downgrade, rol güvenliği,
+RLS (context'siz red, cross-tenant izolasyon, owner-bypass engeli), atomiklik,
+rollback ve duplicate membership.
 
 ## Komutlar
 
@@ -141,18 +189,20 @@ Gereksiz dependency eklenmemiştir. `structlog`, `alembic` ve `testcontainers` �
 
 **Neden iki araç:** bounded context'ler şu an boş paketlerdir; `domain`/`application`/`infrastructure` alt paketleri henüz yok. import-linter var olmayan modülü çözemediği için katman bazlı contract'ları **henüz ifade edemez**. Kontrolü sessizce kaldırmak yerine, aynı kuralları boş pakette de çalışan salt-okunur bir AST kontrolüyle zorluyoruz. Layer paketleri oluştuğunda kuralların import-linter'a taşınması değerlendirilecektir — bkz. [ASM-0011](../../docs/assumptions.md).
 
-## Bu scaffold'da BULUNMAYANLAR
+## Bu aşamada BULUNMAYANLAR
 
 Bilinçli olarak yok:
 
-- Database bağlantısı, SQLAlchemy modeli, tablo — **yok**
-- `alembic.ini`, `migrations/` — **yok**
-- Tenant context, RLS, authorization — **yok**
-- Supabase entegrasyonu, authentication kodu — **yok**
-- Workflow runtime, purchase request, approval kodu — **yok**
-- Outbox polling, gerçek worker loop, SIGTERM yönetimi — **yok**
-- Dockerfile, docker-compose — **yok**
-- Health dışında API endpoint'i — **yok**
-- `integration/`, `contract/`, `security/` test klasörlerinde test — **yok** (sahte test eklenmedi)
+- **HTTP organization endpoint'i** (`POST /v1/organizations`) — sonraki aşama
+- **Supabase entegrasyonu, authentication, token doğrulama** — sonraki aşama
+- Login/register/password/session/e-posta doğrulama kodu
+- Team/department, permission/RBAC kataloğu
+- Workflow runtime, purchase request, approval, task kodu
+- Outbox polling, gerçek worker loop, SIGTERM yönetimi
+- Audit, notification, MinIO bucket / object storage SDK kodu
+- Dockerfile, backend container image
+- Health dışında API endpoint'i
 
-**13 bounded context paketi boştur** (yalnız `__init__.py`). İçlerinde entity, model, repository, service, command, handler, SQLAlchemy tablosu veya iş kuralı **bulunmamaktadır**.
+**Var olan domain kodu:** yalnız `identity` (minimal User) ve `organization`
+(Organization/Membership + CreateOrganization use-case'i). Diğer 11 bounded
+context paketi hâlâ boştur.

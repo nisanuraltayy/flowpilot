@@ -128,6 +128,29 @@ Format:
     context içi katman kurallarıdır; onlar da AST ile zorlanıyor. İki aracın birlikte
     çalışması geçici bir durumdur, kalıcı tasarım değildir.
 
+- id: ASM-0012
+  statement: >
+    organization_memberships.user_id, identity_users tablosuna işaret eder ancak
+    veritabanı düzeyinde CROSS-MODULE FOREIGN KEY TANIMLANMAMIŞTIR. Actor'ün
+    varlığı application katmanında, identity'nin açık cross-module contract'ı
+    (UserDirectory.exists) ile doğrulanır.
+  impact: medium
+  reversible: true
+  owner: engineering
+  status: unvalidated
+  validation_method: >
+    Membership lifecycle story'lerinde (FP-E03-001) yeniden değerlendirilir:
+    kullanıcı silme/deaktivasyon senaryoları geldiğinde referential integrity
+    ihtiyacı netleşecek.
+  expires_at: 2026-10-01
+  affected_stories: [FP-E02-001, FP-E03-001]
+  note: >
+    Gerekçe: DB-level FK, identity ve organization modüllerini şema düzeyinde
+    birbirine kilitler ve ileride modül ayrılabilirliğini (ADR-003 strangler)
+    bozar. Maliyet: DB, var olmayan bir user_id'li membership'i engellemez —
+    bu koruma application katmanındadır. Tenant_id FK'sı ise modül İÇİ olduğu
+    için DB düzeyinde tutulmuştur.
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde
