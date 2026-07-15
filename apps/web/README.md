@@ -100,13 +100,14 @@ Vitest + Testing Library. **49 test, coverage %100 statements/functions/lines, %
 
 `npm audit --audit-level=high`: **temiz** (0 high/critical). Not: Next transitive'i `postcss` üzerinden **2 moderate** advisory taşır; tek "düzeltme" Next'i kırıcı biçimde düşürmektir (yapılmadı). CSS stringify XSS'i yalnız güvenilmeyen CSS işlense geçerlidir — kabul edildi.
 
-## Canlı Supabase durumu
+## Canlı Supabase durumu ✅ Doğrulandı (2026-07-15)
 
-Gerçek Supabase projesi/credential **henüz yok**. Bu yüzden:
+Canlı Supabase kabul testi **geçti** (OQ-009/OQ-010 — kapandı; bkz. [docs/open-questions.md](../../docs/open-questions.md)):
 
-- Build, test, lint, typecheck **tam çalışır**; production build başarılı, `/login` ve `/signup` render edilir (smoke ile doğrulandı), korumalı yollar `/login`'e yönlendirir.
-- Auth submit edildiğinde kontrollü "Kimlik doğrulama henüz yapılandırılmamış" mesajı gösterilir.
-- **Canlı signup/login ve gerçek `POST /v1/organizations` uçtan uca kabul testi YAPILMADI** — açık konu: [docs/open-questions.md](../../docs/open-questions.md) OQ-009/OQ-010. Gerçek `SUPABASE_URL` + publishable key sağlandığında test edilebilir.
+- Gerçek signup → e-posta doğrulaması → gerçek login akışı canlı Supabase projesiyle uçtan uca çalıştı.
+- Onboarding'den oluşturulan test organizasyonu, gerçek ES256 access token ile `POST /v1/organizations` → **201** döndürdü; tenant + aktif owner membership **aynı transaction'da** oluştu.
+- Credential'lar yalnız git-ignored `.env.local` içindedir; bu belgeye ve repository'ye **hiçbir değer kopyalanmaz**.
+- Build, test, lint, typecheck credential'sız da tam çalışır; Supabase yapılandırılmamışsa auth submit kontrollü "yapılandırılmamış" mesajı gösterir.
 
 ## Sonraki aşama
 

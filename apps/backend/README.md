@@ -126,17 +126,20 @@ repository'ye dokunmaz. Tenant header istemez — yeni tenant oluşturur.
 
 Health endpoint'leri authentication **istemez**.
 
-### Canlı Supabase olmadan test
+### Canlı Supabase doğrulaması ✅ (2026-07-15)
 
-Adapter production-ready'dir ancak **canlı Supabase projesine karşı henüz
-doğrulanmamıştır** (elde credential yok). Testler network'süz çalışır: RSA/EC
-anahtar çiftleri test çalışma anında üretilir, JWKS bellekten servis edilir ve
-imza/exp/iss/aud/rotation/cache dahil tüm doğrulama gerçek PyJWT kod yolundan
-geçer. Canlı kabul testi için tek gereken: gerçek `SUPABASE_URL` + o projeden
-alınmış bir access token (bkz. docs/open-questions.md OQ-009).
+Adapter, **canlı Supabase projesine karşı kabul testinden geçmiştir**
+(OQ-009 — kapandı): canlı projenin public JWKS'i tek **ES256** (EC P-256)
+imza anahtarı servis etti; gerçek bir kullanıcı oturumundan alınan access
+token bu anahtarla doğrulandı ve `POST /v1/organizations` gerçek token ile
+**201** döndü. Claim eşlemesi beklendiği gibi çalıştı (`auth_provider=supabase`
++ `provider_subject` → internal user; e-posta yalnız snapshot). Bu belgeye
+hiçbir token, e-posta veya kimlik değeri yazılmaz.
 
-**Frontend ve login ekranları henüz yoktur** — token'ı üretecek istemci bir
-sonraki aşamada (Next.js + Supabase login) gelecektir.
+Testler network'süz çalışmaya devam eder: RSA/EC anahtar çiftleri test çalışma
+anında üretilir, JWKS bellekten servis edilir ve imza/exp/iss/aud/rotation/cache
+dahil tüm doğrulama gerçek PyJWT kod yolundan geçer. Token'ı üreten istemci
+**Next.js web uygulamasıdır** ([apps/web](../web/README.md)).
 
 ### Integration testleri (Testcontainers)
 

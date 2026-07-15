@@ -25,7 +25,8 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 | Local altyapı (PostgreSQL + MinIO) | ✅ Tamamlandı |
 | Database foundation + organization creation core | ✅ Tamamlandı |
 | Supabase Auth + `POST /v1/organizations` | ✅ Tamamlandı |
-| **Next.js web + Supabase login + organization onboarding** | ✅ **Bu aşama** |
+| Next.js web + Supabase login + organization onboarding | ✅ Tamamlandı |
+| **Canlı Supabase kabul testi (signup → doğrulama → login → onboarding)** | ✅ **Doğrulandı (2026-07-15)** |
 | İlk dikey dilim (satın alma) | ⏳ Sıradaki |
 
 **İlk gerçek HTTP iş akışı çalışır durumdadır:**
@@ -51,9 +52,10 @@ Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, workflow runtime, purch
 request, approval, outbox, audit, `Dockerfile`, root npm workspace.
 
 Backend domain kodu yalnız `identity` ve `organization` modüllerindedir; diğer 11
-bounded context paketi boştur. **Canlı Supabase projesine karşı kabul testi
-henüz yapılmadı** (credential yok) — bkz. [docs/open-questions.md](docs/open-questions.md)
-OQ-009/OQ-010.
+bounded context paketi boştur. **Canlı Supabase kabul testi 2026-07-15'te geçti:**
+gerçek signup → e-posta doğrulama → login → ES256 token → `POST /v1/organizations`
+→ 201; tenant + aktif owner membership aynı transaction'da oluştu. Ayrıntı:
+[docs/open-questions.md](docs/open-questions.md) (OQ-009/OQ-010 — kapandı).
 
 ---
 
