@@ -12,7 +12,8 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 | OQ-003 | Repository bootstrap yürütme onayı | — | Yüksek | 🟡 **Prensipte onaylandı — komut bekleniyor** |
 | OQ-004 | Onay eşiklerinin gerçek müşteride doğrulanması | — | Düşük | 🟡 **Geçici varsayım olarak kaydedildi** |
 | OQ-008 | AI provider ve veri politikası | LOCK-007 | Düşük | 🔴 Açık (MVP dışı — aciliyet yok) |
-| OQ-009 | Canlı Supabase kabul testi | — | Orta | 🔴 **Açık — credential bekleniyor; frontend/login aşamasında kapanır** |
+| OQ-009 | Canlı Supabase JWT kabul testi (backend) | — | Orta | 🔴 **Açık — credential bekleniyor** |
+| OQ-010 | Canlı Supabase login/signup + uçtan uca frontend (web) | — | Orta | 🔴 **Açık — OQ-009 ile aynı credential'la kapanır** |
 | OQ-001 | Auth provider | LOCK-004 | — | ✅ **KAPANDI — Supabase Auth** |
 | OQ-005 | PRD MVP listesi ile gerçek MVP kapsamı farkı | — | — | ✅ **KAPANDI** |
 | OQ-006 | E-posta bildirimi | — | — | ✅ **KAPANDI — pilot-ready** |
@@ -59,6 +60,24 @@ göre kodlandı; en olası sapma noktaları issuer/audience varsayılanlarıdır
 ikisi de yapılandırılabilir.
 
 **Zamanlama:** Frontend + Supabase login aşamasında doğal olarak kapanır.
+
+---
+
+### OQ-010 — Canlı Supabase login/signup ve uçtan uca frontend kabul testi
+
+**Durum:** 🔴 Açık — gerçek Supabase projesi/credential bekleniyor (OQ-009'un frontend tarafı)
+
+**Tespit:** Next.js web uygulaması (login/signup/onboarding) production-ready yazıldı ve şu doğrulamalar geçti: 49 birim testi, ESLint, strict typecheck, production build ve credential'sız smoke (`/login` ve `/signup` 200 render, korumalı `/dashboard` → `/login` 307). Ancak **canlı Supabase ile gerçek kayıt/giriş ve gerçek access token'la uçtan uca `POST /v1/organizations` akışı DOĞRULANMADI** — elde gerçek proje URL'i ve publishable key yok.
+
+**Gereken:** Supabase projesi hazır olduğunda:
+1. `apps/web/.env.local` içine `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (git-ignored).
+2. `FLOWPILOT_API_BASE_URL` backend'e işaret eder (varsayılan `http://127.0.0.1:8000`).
+3. `npm run dev` + backend `uvicorn`; gerçek bir test kullanıcısıyla signup/login yapılır.
+4. Onboarding'de organizasyon oluşturulur; oluşan organization açıkça **test verisi** olarak işaretlenir.
+
+**Risk:** Düşük-orta. Cookie/SSR akışı `@supabase/ssr`'ın güncel convention'ıyla kodlandı; en olası sapma, e-posta doğrulama ayarları (Supabase projesinde "confirm email" açık/kapalı) ve callback URL yapılandırmasıdır.
+
+**Bağlantı:** OQ-009 (backend JWT kabul testi) ile aynı credential'la birlikte kapanır.
 
 ---
 

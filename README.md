@@ -24,9 +24,9 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 | Backend scaffold + quality tooling | ✅ Tamamlandı |
 | Local altyapı (PostgreSQL + MinIO) | ✅ Tamamlandı |
 | Database foundation + organization creation core | ✅ Tamamlandı |
-| **Supabase Auth + `POST /v1/organizations`** | ✅ **Bu aşama** |
-| Next.js frontend + Supabase login + organization formu | ⏳ Sıradaki |
-| İlk dikey dilim (satın alma) | ⛔ Henüz başlamadı |
+| Supabase Auth + `POST /v1/organizations` | ✅ Tamamlandı |
+| **Next.js web + Supabase login + organization onboarding** | ✅ **Bu aşama** |
+| İlk dikey dilim (satın alma) | ⏳ Sıradaki |
 
 **İlk gerçek HTTP iş akışı çalışır durumdadır:**
 
@@ -37,17 +37,23 @@ Bearer access token → Supabase JWT doğrulama (public JWKS, RS256/ES256)
   → HTTP 201
 ```
 
+Bu akışı artık **Next.js web arayüzü** de sürer: kayıt ol → giriş yap → oturum
+cookie'si → organizasyon adı → server action → Bearer token ile FastAPI →
+`POST /v1/organizations` → başarı ekranı. Supabase yalnız kimlik doğrulaması
+için kullanılır (service role key ve Supabase SDK'sı yok); browser'dan hiçbir
+business tablosuna erişilmez — veri yalnız FastAPI üzerinden yönetilir.
+
 Tenant izolasyonu PostgreSQL RLS (ENABLE + FORCE) ile gerçek veritabanı
 testlerinde kanıtlanmıştır. Alembic history: `0001` + `0002`. Roller:
-`flowpilot_app`/`flowpilot_migrator` (ikisi de BYPASSRLS'siz). Supabase yalnız
-JWT doğrulaması için kullanılır — service role key ve Supabase SDK'sı yoktur.
+`flowpilot_app`/`flowpilot_migrator` (ikisi de BYPASSRLS'siz).
 
-Repository'de bulunmayanlar (kasıtlı): frontend/login ekranları, RBAC kataloğu,
-workflow runtime, purchase request, approval, outbox, audit, `Dockerfile`.
+Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, workflow runtime, purchase
+request, approval, outbox, audit, `Dockerfile`, root npm workspace.
 
-Domain kodu yalnız `identity` ve `organization` modüllerindedir; diğer 11
+Backend domain kodu yalnız `identity` ve `organization` modüllerindedir; diğer 11
 bounded context paketi boştur. **Canlı Supabase projesine karşı kabul testi
-henüz yapılmadı** (credential yok) — bkz. [docs/open-questions.md](docs/open-questions.md).
+henüz yapılmadı** (credential yok) — bkz. [docs/open-questions.md](docs/open-questions.md)
+OQ-009/OQ-010.
 
 ---
 
@@ -109,7 +115,8 @@ flowpilot/
 │   │   │   ├── api/                #     FastAPI composition root (iş mantığı YOK)
 │   │   │   └── worker/             #     outbox/timer worker root (iş mantığı YOK)
 │   │   └── tests/                  #   unit, integration, contract, security
-│   └── web/                        # Next.js kullanıcı uygulaması
+│   └── web/                        # Next.js 16 web uygulaması (App Router, TS, Tailwind)
+│       └── src/{app,components,features,lib}/
 ├── packages/
 │   ├── contracts/                  # OpenAPI/AsyncAPI/JSON Schema + üretilen TS tipleri
 │   └── ui/                         # Frontend design system
@@ -190,6 +197,18 @@ Kalite kapıları:
 ```
 
 Ayrıntı: [apps/backend/README.md](apps/backend/README.md). `.venv` Git'e **eklenmez**. `.env.example` gerçek secret **içermez**.
+
+### Frontend (Next.js)
+
+```powershell
+cd apps/web
+npm install
+Copy-Item .env.local.example .env.local   # .env.local git-ignored; Supabase değerlerini girin
+npm run dev            # http://localhost:3000
+npm run lint; npm run typecheck; npm run test; npm run build
+```
+
+Ayrıntı ve mimari: [apps/web/README.md](apps/web/README.md). Frontend yalnız **publishable** Supabase key kullanır; service role key **yoktur**.
 
 ### Local altyapı (PostgreSQL + MinIO)
 
