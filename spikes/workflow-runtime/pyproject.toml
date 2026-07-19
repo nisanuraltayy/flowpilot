@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowpilot-spike-workflow-runtime"
+version = "0.0.1"
+description = "GECICI spike - production kodu degildir (ADR-004 / E08 / LOCK-003)"
+requires-python = ">=3.12"
+# Yeni dependency YOK: sqlalchemy, psycopg, pytest ve testcontainers
+# mevcut backend dev ortamindan (.venv) yeniden kullanilir.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "DTZ", "T10", "S"]
+# DTZ: naive datetime yasak. T10: debugger kalintisi yasak. S: bandit (eval/exec dahil).
+# RUF001/002/003: backend ile ayni gerekce — dokuman/yorum dili Turkce'dir;
+# bu kurallar Turkce harfleri homoglyph sayip salt gurultu uretir.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: pytest assert. S105/S106: izole test container'inin sahte parolalari.
+# S603: testler kendi yazdigimiz worker subprocess'ini bilerek baslatir/oldurur.
+"tests/**" = ["S101", "S105", "S106", "S603"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["spike_runtime"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+warn_unreachable = true
+mypy_path = "src"
+packages = ["spike_runtime"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

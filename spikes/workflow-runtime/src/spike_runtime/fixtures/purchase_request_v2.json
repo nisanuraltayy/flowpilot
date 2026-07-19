@@ -1,0 +1,58 @@
+{
+  "workflow_key": "purchase-request",
+  "description": "SPK-02 için v2: eşik 20.000 TL'ye çekildi ve düşük bant zinciri değişti. Bekleyen v1 instance'ları BUNDAN ETKİLENMEMELİDİR.",
+  "nodes": [
+    { "id": "start", "type": "start", "next": "purchase_form" },
+    {
+      "id": "purchase_form",
+      "type": "form",
+      "next": "amount_condition",
+      "config": {
+        "fields": [
+          { "name": "item_name", "type": "string" },
+          { "name": "category", "type": "string" },
+          { "name": "amount_minor", "type": "money_minor_unit" },
+          { "name": "currency", "type": "currency" },
+          { "name": "justification", "type": "string" }
+        ]
+      }
+    },
+    {
+      "id": "amount_condition",
+      "type": "condition",
+      "config": {
+        "branches": [
+          {
+            "branch_id": "low",
+            "when": { "field": "amount_minor", "op": "lt", "value": 2000000, "currency": "TRY" },
+            "next": "approval_low"
+          },
+          {
+            "branch_id": "high",
+            "when": { "op": "otherwise" },
+            "next": "approval_high"
+          }
+        ]
+      }
+    },
+    {
+      "id": "approval_low",
+      "type": "sequential_approval",
+      "next": "notify_requester",
+      "config": { "approver_chain": ["finance"] }
+    },
+    {
+      "id": "approval_high",
+      "type": "sequential_approval",
+      "next": "notify_requester",
+      "config": { "approver_chain": ["finance", "general_manager"] }
+    },
+    {
+      "id": "notify_requester",
+      "type": "notification",
+      "next": "end",
+      "config": { "recipient_role": "requester", "message_key": "purchase_request.finished" }
+    },
+    { "id": "end", "type": "end" }
+  ]
+}
