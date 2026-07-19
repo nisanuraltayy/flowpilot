@@ -6,7 +6,8 @@
 - **Sürüm:** v0.1
 - **Canlı kabul:** ✅ **MVP v0.1.0 uçtan uca canlı kabul PASS** (2026-07-19, commit `c9043e8`).
   Release kaydı: [../releases/mvp-v0.1.0.md](../releases/mvp-v0.1.0.md). Gerçek cloud deployment
-  YAPILMADI (LOCK-006 açık); pilot öncesi işler: [pilot-readiness.md](pilot-readiness.md).
+  YAPILMADI (ilk hosting kararı ADR-010 — Render Frankfurt; LOCK-006 kapandı); pilot öncesi
+  işler: [pilot-readiness.md](pilot-readiness.md).
 
 ---
 
@@ -135,7 +136,7 @@ MVP'de **portu tasarlanır**, ancak yalnız belirtilen adapter uygulanır. Bu, s
 | `AuthProviderPort` | Supabase Auth adapter + fake adapter | (Provider değişimi) |
 | `NotificationChannelPort` | **Yalnız in-app** | E-posta (pilot-ready), Slack/Teams (sonra) |
 | `MalwareScanPort` | **Yalnız no-op / stub** — `scan_status` alanı ve indirmeyi engelleyen kapı hazır | Gerçek tarama servisi (pilot-ready) |
-| `FileStoragePort` | S3-compatible (local: MinIO) | Production sağlayıcısı (LOCK-006) |
+| `FileStoragePort` | S3-compatible (local: MinIO) | Production S3-compatible sağlayıcısı — **ertelendi** (MVP'de kullanılmıyor; ADR-010) |
 | `WorkflowRuntimePort` | Custom PostgreSQL-backed (spike 12/12 geçti — ADR-004 Accepted, 2026-07-19) | Temporal (yalnız kriterler ilerde bozulursa) |
 | `ClockPort`, `IdGeneratorPort` | System / fake | — |
 

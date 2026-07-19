@@ -1,9 +1,10 @@
 # FlowPilot Deployment Runbook (Provider-Neutral)
 
 > **Kapsam.** Bu runbook FlowPilot MVP v0.1.0'ı bir ortama nasıl güvenle taşıyacağını
-> tarif eder. **Provider-neutral**'dir: belirli bir bulut sağlayıcı/host seçilmemiştir
-> (LOCK-006 açık — owner kararı gerekir). Bu belge **gerçek bir deployment yapıldığını
-> iddia ETMEZ**; hazırlık ve prosedürdür.
+> tarif eder. **Provider-neutral**'dir (uygulama kodu sağlayıcıya bağlı değildir). İlk
+> hosting kararı verildi: **Render (Frankfurt)** (ADR-010; LOCK-006 kapandı) — sağlayıcıya
+> özgü kurulum [render-staging-plan.md](render-staging-plan.md)'dedir. Bu belge **gerçek bir
+> deployment yapıldığını iddia ETMEZ**; hazırlık ve prosedürdür.
 >
 > **Güvenlik:** Bu belgede hiçbir gerçek secret, token, parola veya örnek gerçek değer
 > bulunmaz — yalnız değişken **adları** ve açıklamaları.
@@ -132,7 +133,8 @@ Load balancer/orchestrator readiness'i trafik açmadan önce beklemeli.
 
 ## 11. Backup / restore yaklaşımı
 
-- **Zamanlı tam yedek** + mümkünse PITR (WAL) — provider seçilince netleşir (LOCK-006).
+- **Zamanlı tam yedek** + mümkünse PITR (WAL) — Render Managed PostgreSQL yedekleme özellikleriyle
+  netleşir (ADR-010; kurulumda doğrulanır).
 - Her deploy öncesi **anlık yedek**; restore prosedürü staging'de **test edilmiş** olmalı.
 - Object storage (kullanılmaya başlandığında) ayrı yedek/lifecycle politikasına tabidir.
 - Restore tatbikatı yapılmadan production'a geçilmez (pilot blocker'ı).

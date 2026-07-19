@@ -14,7 +14,7 @@
 
 | # | Blocker | Sahip | Not |
 |---|---|---|---|
-| 1 | **Hosting / veri bölgesi kararı** | owner | LOCK-006 açık; provider-neutral kalır, deployment'ta karar gerekir |
+| 1 | **Gerçek staging/pilot deployment** | eng | Hosting kararı VERİLDİ (ADR-010 — Render Frankfurt; LOCK-006 kapandı). Kalan: Render kaynaklarının gerçekten kurulması ve deploy edilmesi (henüz yapılmadı) |
 | 2 | **Production DB backup politikası** | owner + eng | Zamanlı yedek + PITR; **restore tatbikatı** staging'de yapılmadan production yok |
 | 3 | **CI'ın gerçek GitHub runner'da geçmesi** | eng | `.github/workflows/ci.yml` yazıldı; **gerçek runner'da henüz koşmadı** (bu repo'da remote/push yok) |
 | 4 | **Staging deploy** | eng | staging ortamı yok; [staging-acceptance-checklist](../operations/staging-acceptance-checklist.md) orada koşacak |
@@ -43,7 +43,9 @@ workflow designer · dosya ekleri · e-posta notification · billing · **AI öz
 
 ## İlgili kilitler
 
-- **LOCK-006 (hosting/veri bölgesi): AÇIK** — deployment provider-neutral; owner kararı bekliyor.
+- **LOCK-006 (hosting/veri bölgesi): KAPANDI** (ADR-010 — Render Frankfurt + Supabase Auth
+  Frankfurt, 2026-07-19; staging + ilk pilot kapsamı). Gerçek deployment henüz yapılmadı;
+  object storage kararı ertelendi.
 - **LOCK-007 (AI provider ve veri politikası): AÇIK** — AI MVP dışı; production entegrasyon kararı
   pilot sonrasına **açıkça ve gerekçeli** ertelendi (sessiz kapanış değil). Kilit durumu şeması
   yalnız AÇIK/KAPALI desteklediğinden yeni bir "deferred" statüsü uydurulmadı; durum **AÇIK**

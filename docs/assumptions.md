@@ -286,13 +286,15 @@ Format:
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde
-    doğrulanır; production'da hangi S3-compatible sağlayıcının kullanılacağı hosting
-    kararına (LOCK-006, OQ-002) bağlıdır.
+    doğrulanır; production S3-compatible sağlayıcı kararı ERTELENMİŞTİR. Hosting kararı
+    verildi (ADR-010 — Render Frankfurt; LOCK-006 kapandı) ancak object storage MVP'de aktif
+    kullanılmadığından ayrı bir sağlayıcı bu aşamada seçilmemiştir; dosya eki akışı pilota
+    girerse seçilecektir.
   impact: low
   reversible: true
   owner: engineering
   status: unvalidated
-  validation_method: "Hosting kararı verildiğinde sağlayıcı seçilir."
+  validation_method: "Dosya eki akışı pilota girdiğinde S3-compatible sağlayıcı seçilir (ADR-010'da ertelendi)."
   expires_at: 2026-10-01
   affected_stories: [FP-E06-003]
   note: "Port sayesinde sağlayıcı değişimi adapter değişikliğinden ibarettir."

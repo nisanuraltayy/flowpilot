@@ -37,8 +37,9 @@ Bir çatışma olduğunda **üstteki kazanır**. Mevcut kod bu sıranın üstün
 | [ADR-007](docs/adr/ADR-007-transactional-outbox.md) | Transactional outbox + PostgreSQL-backed polling worker | Accepted |
 | [ADR-008](docs/adr/ADR-008-monorepo.md) | Monorepo | Accepted |
 | [ADR-009](docs/adr/ADR-009-python-physical-layout.md) | **Tek Python distribution** (`flowpilot-backend`, `apps/backend`), tek import kökü `flowpilot`. Bounded context'ler `flowpilot.modules.<snake_case>`. `api` ve `worker` aynı paketin iki composition root'u | Accepted |
+| [ADR-010](docs/adr/ADR-010-initial-hosting-and-data-region.md) | İlk hosting/veri bölgesi: **Render (Frankfurt)** + Supabase Auth (Frankfurt); staging + ilk pilot. Gerçek deployment henüz YAPILMADI; object storage ertelendi | Accepted |
 
-Diğer kesinleşmiş kararlar: PostgreSQL tek source of truth · S3-compatible storage portu (local: MinIO adayı) · Arama MVP'de PostgreSQL full-text · Deployment Docker tabanlı ve provider-neutral (ilk aday Render) · AI özellikleri ve workflow builder canvas gerçek MVP dışında.
+Diğer kesinleşmiş kararlar: PostgreSQL tek source of truth · S3-compatible storage portu (local: MinIO adayı) · Arama MVP'de PostgreSQL full-text · Deployment sağlayıcı-nötr kod + **ilk hosting Render Frankfurt** (ADR-010; gerçek deployment henüz yapılmadı) · AI özellikleri ve workflow builder canvas gerçek MVP dışında.
 
 **Gerçek MVP node seti:** Start, Form, Condition, Sequential Approval, Notification, End. Bunun dışındaki hiçbir node tipi (parallel split/join, quorum, sub-workflow, webhook, script, AI, DMN) implemente edilmez.
 
@@ -60,7 +61,7 @@ Kilit açıkken agent o kararı üretim kodunda **varsayamaz**. Yalnızca karş�
 | LOCK-003 | Workflow runtime | **KAPALI** (ADR-004 — spike 12/12 PASS, 2026-07-19) | Custom PostgreSQL-backed runtime `WorkflowRuntimePort` arkasında yazılabilir (E09). Production implementation henüz YOK |
 | LOCK-004 | Auth provider | **KAPALI** (ADR-005 — Supabase Auth) | Supabase yalnız `AuthProviderPort` adapter'ı içinde. Domain SDK'ya bağımlı olamaz. Entegrasyon bootstrap onayından sonra |
 | LOCK-005 | Queue/worker altyapısı | **KAPALI** (ADR-007) | Outbox + PostgreSQL polling worker |
-| LOCK-006 | Hosting / veri bölgesi | **AÇIK** | Deployment provider-neutral kalır |
+| LOCK-006 | Hosting / veri bölgesi | **KAPALI** (ADR-010 — Render Frankfurt, 2026-07-19) | Karara göre ilerle; kod sağlayıcı-nötr kalır. Gerçek deployment henüz yapılmadı |
 | LOCK-007 | AI provider ve veri politikası | **AÇIK** | MVP dışı. Gerçek AI entegrasyonu yok |
 | LOCK-008 | Monorepo / polyrepo | **KAPALI** (ADR-008) | Monorepo |
 

@@ -49,7 +49,8 @@ business tablosuna erişilmez — veri yalnız FastAPI üzerinden yönetilir.
 
 > **FlowPilot MVP v0.1.0 — canlı uçtan uca kabul: ✅ PASS (2026-07-19, commit `c9043e8`).**
 > Ayrıntı: [docs/releases/mvp-v0.1.0.md](docs/releases/mvp-v0.1.0.md). Gerçek cloud
-> deployment YAPILMADI; hosting kararı LOCK-006 altında açık. Pilot öncesi işler:
+> deployment YAPILMADI; ilk hosting kararı verildi (ADR-010 — Render Frankfurt; LOCK-006
+> kapandı). Pilot öncesi işler:
 > [docs/product/pilot-readiness.md](docs/product/pilot-readiness.md).
 
 Tenant izolasyonu PostgreSQL RLS (ENABLE + FORCE) ile gerçek veritabanı

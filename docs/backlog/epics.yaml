@@ -26,7 +26,8 @@ meta:
     record: docs/releases/mvp-v0.1.0.md
     note: >
       Dikey dilim uçtan uca canlı kabul edildi. Gerçek cloud deployment YAPILMADI
-      (LOCK-006 açık; LOCK-007 AI kararı pilot sonrasına açıkça ertelendi).
+      (İlk hosting kararı ADR-010 — Render Frankfurt; LOCK-006 kapandı, gerçek deployment
+      henüz yapılmadı. LOCK-007 AI kararı pilot sonrasına açıkça ertelendi.)
   scope_source: docs/product/mvp-scope-v0.1.md
 
   mvp_node_set:

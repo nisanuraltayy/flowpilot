@@ -9,9 +9,9 @@
 | **Migration seviyesi** | `0006` (head) |
 | **Local tag** | `v0.1.0-mvp` (yalnız local; remote/push yapılmadı) |
 
-> Bu kayıt bir **sürüm hazırlığı** belgesidir. Gerçek cloud deployment **YAPILMAMIŞTIR**;
-> provider/host kararı LOCK-006 altında açıktır (bkz. §Bilinen riskler ve
-> [pilot-readiness](../product/pilot-readiness.md)).
+> Bu kayıt bir **sürüm hazırlığı** belgesidir. Gerçek cloud deployment **YAPILMAMIŞTIR**.
+> İlk hosting kararı verildi: **Render (Frankfurt)** (ADR-010; LOCK-006 kapandı) — kurulum/deploy
+> henüz yapılmadı (bkz. §Bilinen riskler ve [pilot-readiness](../product/pilot-readiness.md)).
 
 ## Stack özeti
 
@@ -68,7 +68,8 @@ beklenmeyen 500 yok, frontend runtime/compile hatası yok, secret sızıntısı 
 
 ## Bilinen riskler
 
-- **Hosting/veri bölgesi kararı açık** (LOCK-006) — deployment provider-neutral; owner kararı gerekir.
+- **Gerçek deployment yapılmadı.** İlk hosting kararı verildi (ADR-010 — Render Frankfurt;
+  LOCK-006 kapandı); Render kaynaklarının kurulması ve deploy henüz yapılmadı.
 - **AI provider kararı ertelendi** (LOCK-007) — AI MVP dışı; production entegrasyonu pilot sonrasına
   açıkça ertelendi (sessiz kapanış değil).
 - **Separation-of-duties yok:** self-approval MVP'de owner onaylı geçici karar (ASM-0016); pilot

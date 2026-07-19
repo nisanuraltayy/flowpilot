@@ -5,7 +5,8 @@
 > değerlendirilir (bkz. [deployment-runbook](deployment-runbook.md) §12).
 >
 > Bu bir **prosedür şablonudur**; doldurulmuş bir çalıştırma gerçek staging ortamı
-> gerektirir (henüz yok — LOCK-006).
+> gerektirir (henüz kurulmadı). Hedef ortam: **Render Frankfurt** (ADR-010; deploy henüz
+> yapılmadı — bkz. [render-staging-plan.md](render-staging-plan.md)).
 
 ## Altyapı / güvenlik
 

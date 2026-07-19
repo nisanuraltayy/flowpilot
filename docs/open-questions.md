@@ -8,7 +8,7 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 
 | Kimlik | Konu | Kilit | Etki | Durum |
 |---|---|---|---|---|
-| OQ-002 | Hosting sağlayıcısı ve veri bölgesi | LOCK-006 | Orta | 🔴 **Açık** |
+| OQ-002 | Hosting sağlayıcısı ve veri bölgesi | LOCK-006 | Orta | ✅ **KAPANDI — Render Frankfurt (ADR-010, 2026-07-19); deployment henüz yapılmadı** |
 | OQ-003 | Repository bootstrap yürütme onayı | — | Yüksek | 🟡 **Prensipte onaylandı — komut bekleniyor** |
 | OQ-004 | Onay eşiklerinin gerçek müşteride doğrulanması | — | Düşük | 🟡 **Geçici varsayım olarak kaydedildi** |
 | OQ-008 | AI provider ve veri politikası | LOCK-007 | Düşük | 🔴 Açık (MVP dışı — aciliyet yok) |
@@ -22,21 +22,6 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 ---
 
 ## 🔴 Açık kararlar
-
-### OQ-002 — Hosting sağlayıcısı ve veri bölgesi
-
-**Durum:** 🔴 Açık
-**Kilit:** LOCK-006
-
-**Soru:** Production hangi sağlayıcıda ve hangi veri bölgesinde çalışacak? İlk aday **Render**.
-
-**Bağlantı:** Supabase Auth seçildi (OQ-001). Supabase self-host edilebilir olduğu için veri yerleşimi (KVKK) üzerinde kontrol mümkün — ancak *managed Supabase* mi *self-host Supabase* mi kullanılacağı bu kararla birlikte netleşmelidir.
-
-**Karar verilene kadar agent ne yapar:** Deployment **provider-neutral** kalır (Docker tabanlı). Sağlayıcıya özgü manifest, buildpack veya SDK eklenmez.
-
-**MVP'yi bloke eder mi:** Hayır. Local MVP tamamen local çalışır. Pilot-ready öncesinde karar gerekir.
-
----
 
 ### OQ-008 — AI provider ve veri politikası
 
@@ -94,6 +79,21 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 ---
 
 ## ✅ Kapanan kararlar
+
+### OQ-002 — Hosting sağlayıcısı ve veri bölgesi ✅ KAPANDI
+
+**Kapanış (2026-07-19):** Owner kararı — **Render (Frankfurt)** + mevcut **Supabase Auth
+(Frankfurt)**. Kilit **LOCK-006 kapandı**; karar **[ADR-010](adr/ADR-010-initial-hosting-and-data-region.md)**'da.
+
+- **Kapsam:** staging ve ilk pilot; production ölçekleme öncesi yeniden değerlendirilebilir.
+- Servis dağılımı (hepsi Frankfurt): Next.js web + FastAPI api = Render Web Service;
+  worker = Render Background Worker; PostgreSQL = Render Managed PostgreSQL (aynı-region
+  private); auth = Supabase Auth.
+- **Object storage kararı ERTELENDİ** — MVP'de kullanılmıyor; gerektiğinde S3-compatible seçilecek.
+- **Gerçek deployment HENÜZ YAPILMADI** — Render kaynağı oluşturulmadı, remote/push yapılmadı.
+  Kod sağlayıcı-nötr kalır. Kurulum sonraki interaktif adımda kullanıcı hesabıyla yapılacak.
+
+---
 
 ### OQ-009 — Canlı Supabase JWT kabul testi (backend) ✅ KAPANDI
 
@@ -184,3 +184,4 @@ Kanıt özeti (secret veya kişisel veri içermez):
 | Tenant izolasyonu | Application scope + PostgreSQL RLS | ADR-006 | — |
 | Asenkron işlem | Transactional outbox + PostgreSQL polling worker | ADR-007 | LOCK-005 ✅ |
 | Repository | Monorepo | ADR-008 | LOCK-008 ✅ |
+| Hosting / veri bölgesi | **Render (Frankfurt)** + Supabase Auth (Frankfurt); staging + ilk pilot. Gerçek deployment henüz yapılmadı; object storage ertelendi | ADR-010 | LOCK-006 ✅ |

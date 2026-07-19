@@ -29,7 +29,8 @@ meta:
     record: docs/releases/mvp-v0.1.0.md
     note: >
       Uçtan uca satın alma talebi + sıralı onay + timeline akışı canlı kabul edildi.
-      Gerçek cloud deployment YAPILMADI (LOCK-006 açık). Bireysel story done-durumları
+      Gerçek cloud deployment YAPILMADI (ilk hosting kararı ADR-010 — Render Frankfurt;
+      LOCK-006 kapandı). Bireysel story done-durumları
       bu milestone tarafından otomatik değiştirilmez.
   slice: purchase-request
   flow: >

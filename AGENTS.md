@@ -69,7 +69,7 @@ Agent her görevde **bu sırayı** izler:
 | LOCK-003 | Workflow runtime | KAPALI — ADR-004 (spike 12/12 PASS, 2026-07-19) | Custom PostgreSQL-backed runtime `WorkflowRuntimePort` arkasında yazılabilir (E09). Production implementation henüz YOK; ADR-004 §Karar/3 tasarım kararlarına uyulur |
 | LOCK-004 | Auth provider | KAPALI — ADR-005 (**Supabase Auth**) | Supabase yalnız `AuthProviderPort` adapter'ında. Supabase'in org/rol modeline bağımlılık YASAK. Supabase'in DB/RLS'i FlowPilot'ın operasyonel veritabanı olarak kullanılamaz. Entegrasyon **bootstrap onayından sonra** |
 | LOCK-005 | Queue/worker | KAPALI — ADR-007 | Outbox + PostgreSQL polling worker |
-| LOCK-006 | Hosting / veri bölgesi | AÇIK | Provider-neutral Docker. Provider'a özgü manifest YASAK |
+| LOCK-006 | Hosting / veri bölgesi | KAPALI (ADR-010 — Render Frankfurt, 2026-07-19) | Kod sağlayıcı-nötr kalır; `render.yaml` yalnız gerçek kurulumda eklenir. Gerçek deployment henüz yapılmadı |
 | LOCK-007 | AI provider | AÇIK | MVP dışı. Gerçek AI entegrasyonu YASAK |
 | LOCK-008 | Monorepo | KAPALI — ADR-008 | Monorepo |
 
