@@ -255,6 +255,34 @@ Format:
     version CAS) bu izinden bağımsız olarak her zaman geçerlidir.
   reference: apps/backend/src/flowpilot/modules/approval/README.md
 
+- id: ASM-0017
+  statement: >
+    Frontend'in yeniden girişte aktif organizasyon context'ini çözebilmesi için
+    `GET /v1/me/organizations` eklendi. Bir kullanıcının hangi organizasyonlara üye
+    olduğu doğası gereği CROSS-TENANT'tır; organization_memberships üzerindeki tek
+    SELECT policy ise tenant-scoped'tur (migration 0001) ve flowpilot_app NOBYPASSRLS
+    olduğundan bu listeyi ALAMAZ. Bu nedenle owner onayıyla ADDITIVE migration 0006
+    eklendi: kullanıcının YALNIZ KENDİ üyelik satırlarını görebildiği ikinci bir SELECT
+    policy (`user_id = current_actor_id`). RLS policy'leri OR ile birleşir; mevcut
+    tenant-scope davranışı DEĞİŞMEZ, başka kullanıcının/başka tenant'ın verisi SIZMAZ.
+    Aktif org, frontend'de HttpOnly `flowpilot_active_organization` cookie'sinde (yalnız
+    org UUID) tutulur; cookie AUTHORIZATION KAYNAĞI DEĞİLDİR — her istekte membership
+    backend'de yeniden doğrulanır (stale/uydurma UUID reddedilir).
+  impact: medium
+  reversible: true
+  owner: engineering
+  status: validated
+  validation_method: >
+    Owner onayı (2026-07-19): migration 0006 (actor-scoped membership SELECT policy)
+    kabul edildi. Alternatif "migration yok, kapsamı daralt" reddedildi.
+  expires_at: 2026-12-01
+  affected_stories: [FP-E11-001]
+  binding_rule: >
+    Cookie tek başına yetki VERMEZ; org context her istekte listMyOrganizations
+    (actor-scoped RLS) ile doğrulanır. Bu endpoint bir organization management API'si
+    DEĞİLDİR; yalnız actor'ın kendi aktif üyeliklerini döndürür.
+  reference: apps/backend/migrations/versions/0006_membership_actor_select_policy.py
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde

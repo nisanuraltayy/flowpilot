@@ -13,7 +13,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseConfig } from "@/lib/env";
 
 /** Authentication gerektiren yol önekleri. */
-const PROTECTED_PREFIXES = ["/onboarding", "/dashboard"] as const;
+const PROTECTED_PREFIXES = [
+  "/onboarding",
+  "/dashboard",
+  "/organizations",
+  "/purchase-requests",
+  "/tasks",
+] as const;
 
 /** Oturum açmış kullanıcının görmesi gereksiz auth sayfaları. */
 const AUTH_PAGES = ["/login", "/signup"] as const;
@@ -75,7 +81,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   if (isAuthenticated && isAuthPage(pathname)) {
     const url = request.nextUrl.clone();
-    url.pathname = "/onboarding/organization";
+    url.pathname = "/dashboard";
     return NextResponse.redirect(url);
   }
 

@@ -12,8 +12,14 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from flowpilot.modules.organization.application.contracts import ActiveMembershipView
-from flowpilot.modules.organization.infrastructure.persistence.tables import memberships_table
+from flowpilot.modules.organization.application.contracts import (
+    ActiveMembershipView,
+    UserOrganizationView,
+)
+from flowpilot.modules.organization.infrastructure.persistence.tables import (
+    memberships_table,
+    tenants_table,
+)
 
 
 class SqlAlchemyMembershipQuery:
@@ -52,6 +58,52 @@ class SqlAlchemyMembershipQuery:
             user_id=row["user_id"],
             role=str(row["role"]),
         )
+
+    def list_active_for_user(self, *, user_id: UUID) -> list[UserOrganizationView]:
+        # Tek transaction: önce actor context ile kullanıcının AKTİF üyelik satırları
+        # (actor-scoped RLS policy — migration 0006), sonra her tenant için org adı
+        # mevcut tenant-scope policy ile okunur (tenant context set edilerek).
+        with self._session_factory() as session, session.begin():
+            session.execute(
+                text("SELECT set_config('app.current_actor_id', :v, true)"),
+                {"v": str(user_id)},
+            )
+            membership_rows = (
+                session.execute(
+                    select(
+                        memberships_table.c.tenant_id,
+                        memberships_table.c.role,
+                        memberships_table.c.status,
+                    ).where(
+                        (memberships_table.c.user_id == user_id)
+                        & (memberships_table.c.status == "active")
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            organizations: list[UserOrganizationView] = []
+            for membership in membership_rows:
+                tenant_id = membership["tenant_id"]
+                session.execute(
+                    text("SELECT set_config('app.current_tenant_id', :v, true)"),
+                    {"v": str(tenant_id)},
+                )
+                name = session.execute(
+                    select(tenants_table.c.name).where(tenants_table.c.id == tenant_id)
+                ).scalar_one_or_none()
+                if name is None:
+                    # Tenant kaydı okunamadıysa (beklenmez) org sızdırma — atla.
+                    continue
+                organizations.append(
+                    UserOrganizationView(
+                        organization_id=tenant_id,
+                        name=str(name),
+                        membership_kind=str(membership["role"]),
+                        membership_status=str(membership["status"]),
+                    )
+                )
+        return organizations
 
     def find_active_owner(self, *, tenant_id: UUID) -> ActiveMembershipView | None:
         with self._session_factory() as session, session.begin():

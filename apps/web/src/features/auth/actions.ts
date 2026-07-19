@@ -61,7 +61,7 @@ export async function signInAction(
     return errorResult(GENERIC_SIGNIN_ERROR);
   }
 
-  redirect("/onboarding/organization");
+  redirect("/dashboard");
 }
 
 export async function signUpAction(

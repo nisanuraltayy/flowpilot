@@ -13,6 +13,13 @@ describe("isProtectedPath", () => {
     expect(isProtectedPath("/dashboard")).toBe(true);
   });
 
+  it("organizasyon seçimi, talepler ve görev kutusu korumalıdır", () => {
+    expect(isProtectedPath("/organizations/select")).toBe(true);
+    expect(isProtectedPath("/purchase-requests")).toBe(true);
+    expect(isProtectedPath("/purchase-requests/new")).toBe(true);
+    expect(isProtectedPath("/tasks/inbox")).toBe(true);
+  });
+
   it("login, signup, auth ve kök korumalı değildir", () => {
     expect(isProtectedPath("/login")).toBe(false);
     expect(isProtectedPath("/signup")).toBe(false);

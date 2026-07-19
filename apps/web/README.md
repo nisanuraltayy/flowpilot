@@ -2,13 +2,16 @@
 
 FlowPilot web arayüzü. Next.js 16 (App Router) + React 19 + TypeScript (strict) + Tailwind CSS v4 (ADR-002, ADR-009).
 
-Bu aşamada teslim edilen ilk kullanıcı akışı:
+Bu aşamada teslim edilen uçtan uca kullanıcı akışı (tarayıcıdan çalışır):
 
 ```text
-Kayıt ol → (gerekliyse e-posta doğrulama) → Giriş yap → oturum cookie'si
-  → Organizasyon adı → Next.js server action → FastAPI'ye Bearer token
-  → POST /v1/organizations → organizasyon + aktif owner membership → başarı ekranı
+Giriş yap → aktif organizasyonu çöz/seç → satın alma talebi oluştur
+  → "Taleplerim"de gör → kişisel onay kutusunda ilk görevi gör
+  → onayla / reddet → sıradaki görev inbox'ta → süreç bitince durum + timeline
 ```
+
+MVP'de aynı owner üç approval role'e de atandığı için tek kullanıcı tüm sıralı akışı
+uçtan uca tamamlayabilir (self-approval SERBEST — owner kararı, ASM-0016).
 
 ## Kurulum
 
@@ -56,14 +59,14 @@ Browser'dan **hiçbir Supabase business/database tablosuna erişilmez**. FlowPil
 
 Cookie adapter'ı güncel **toplu API** (`getAll`/`setAll`) kullanır; deprecated tekil `get`/`set`/`remove` **yoktur**. Korumalı yollarda **doğrulanmış claims** (`getClaims()`, JWT imzası kontrol edilir) kullanılır — yalnız session cookie'sinin varlığına güvenilmez.
 
-**Korumalı:** `/onboarding/*`, `/dashboard`. **Açık:** `/login`, `/signup`, `/auth/*`, statik dosyalar.
+**Korumalı:** `/onboarding/*`, `/dashboard`, `/organizations/*`, `/purchase-requests/*`, `/tasks/*`. **Açık:** `/login`, `/signup`, `/auth/*`, statik dosyalar.
 
 ### Login / Signup akışı
 
 Server action'lar ([`features/auth/actions.ts`](src/features/auth/actions.ts)):
 
-- `signInAction` — `signInWithPassword`; başarıda `/onboarding/organization`. Hata **tek generic mesaj** (kullanıcı var/yok **sızdırılmaz**).
-- `signUpAction` — `signUp` (callback `/auth/callback`); oturum hemen açılırsa onboarding, aksi halde `/auth/check-email`. Var olan kullanıcıyı **sızdırmayan** generic mesaj.
+- `signInAction` — `signInWithPassword`; başarıda `/dashboard` (context çözümü orada: 0 org → onboarding, çok org → seçim). Hata **tek generic mesaj** (kullanıcı var/yok **sızdırılmaz**).
+- `signUpAction` — `signUp` (callback `/auth/callback`); oturum hemen açılırsa `/dashboard`, aksi halde `/auth/check-email`. Var olan kullanıcıyı **sızdırmayan** generic mesaj.
 - `signOutAction` — oturumu kapatır, `/login`.
 
 Şifreler hiçbir state/log/debug çıktısına yazılmaz.
@@ -84,17 +87,30 @@ Native `fetch`, `cache: "no-store"`, kontrollü timeout (10 sn), **otomatik retr
 
 ### Organization onboarding
 
-[`features/organizations/actions.ts`](src/features/organizations/actions.ts) `createOrganizationAction`: Zod ön-doğrulama (nihai kaynak backend), server-side token, FastAPI çağrısı, typed sonuç. **Actor/owner/tenant ID form alanı değildir** — kimlik yalnız doğrulanmış oturumdan gelir; Authorization header browser'da **oluşturulmaz**.
+[`features/organizations/actions.ts`](src/features/organizations/actions.ts) `createOrganizationAction`: Zod ön-doğrulama (nihai kaynak backend), server-side token, FastAPI çağrısı, typed sonuç. **Actor/owner/tenant ID form alanı değildir** — kimlik yalnız doğrulanmış oturumdan gelir. Başarıda yeni organizasyon **aktif org cookie'sine** yazılır.
+
+### Aktif organizasyon context'i
+
+Aktif organizasyon seçimi **server-side** yönetilir:
+
+- Cookie: **`flowpilot_active_organization`** — HttpOnly, SameSite=Lax, Secure(prod), Path=/, **yalnız org UUID** taşır. **Authorization kaynağı DEĞİLDİR.**
+- Her istekte backend `GET /v1/me/organizations` ile membership **yeniden doğrulanır** (actor-scoped RLS). Kullanıcı rastgele bir UUID yazsa bile aktif üyeliğinde yoksa context çözülmez.
+- Yönlendirme (SAF karar: [`active-organization.ts`](src/features/organizations/active-organization.ts)): 0 org → `/onboarding/organization`; tek org → otomatik seçim; çok org → `/organizations/select`; cookie stale ise **yok sayılır** → yeniden seçim.
+- IO + yönlendirme [`context.ts`](src/features/organizations/context.ts) (server-only); seçim [`select-actions.ts`](src/features/organizations/select-actions.ts).
+
+### FlowPilot API kaynakları (server-only)
+
+[`lib/api/http.ts`](src/lib/api/http.ts) + [`lib/api/resources.ts`](src/lib/api/resources.ts): typed fonksiyonlar — `listMyOrganizations`, `createPurchaseRequest`, `listMyPurchaseRequests`, `getPurchaseRequest`, `getPurchaseRequestTimeline`, `getMyTaskInbox`, `decideApprovalTask`. Her biri Zod ile doğrular, snake_case → camelCase eşler. Onay kararında **Idempotency-Key** server tarafında (`crypto.randomUUID`) üretilir; kullanıcıdan istenmez, token/actor'dan türetilmez. Para TL metninden **float üretmeden** kuruşa çevrilir ([`lib/money.ts`](src/lib/money.ts)); **backend nihai doğrulama kaynağıdır**. Karar sonrası **optimistic UI YOK** — server-confirmed state beklenir.
 
 ## Sayfalar
 
-`/` (session'a göre yönlendirir) · `/login` · `/signup` · `/auth/check-email` · `/auth/error` · `/auth/callback` (code→session, open-redirect korumalı) · `/onboarding/organization` (korumalı) · `/dashboard` (korumalı, minimal shell).
+`/` (yönlendirir) · `/login` · `/signup` · `/auth/*` · `/onboarding/organization` · `/organizations/select` · `/dashboard` · `/purchase-requests` (Taleplerim) · `/purchase-requests/new` · `/purchase-requests/[id]` (detay + timeline) · `/tasks/inbox` (onay kutusu). `/dashboard` sonrası tümü korumalı **ve** aktif organizasyon gerektirir.
 
-Arayüz **Türkçe**, açık temalı, B2B SaaS; erişilebilir (label'lar, `aria-live`, focus görünürlüğü, renk-dışı durum). Dark mode ve animasyon kütüphanesi bu aşamada **yok**.
+Arayüz **Türkçe**, açık temalı, B2B SaaS; erişilebilir (semantic nav + `aria-current`, label'lar, `aria-live`, focus görünürlüğü, renk-dışı durum, yeterli kontrast). Durum/rol/timeline event'leri Türkçe etikete eşlenir; backend'in **döndürmediği** değer uydurulmaz (güvenli fallback). UUID ana arayüzde gösterilmez. Dark mode ve animasyon kütüphanesi **yok**.
 
 ## Test / kalite
 
-Vitest + Testing Library. **49 test, coverage %100 statements/functions/lines, %98.5 branches** (birim-test edilebilir saf mantık: şemalar, redirect, API client eşlemeleri, form davranışları — pending disabled, hata görünürlüğü, şifre sızmaması, actor enjekte edilememesi).
+Vitest + Testing Library. **105 test; coverage ~%97 statements/lines, ~%93 branches** (eşik %80). Kapsam: aktif organizasyon karar mantığı (0/1/çok org, stale cookie), para parsing (float üretmediği kanıtlanır), durum/rol/timeline etiket eşlemeleri + bilinmeyen değer fallback, API client (Bearer, aktif org URL, Zod reddi, 401/404/409/422/503/timeout eşlemeleri, Idempotency-Key header, token sızmaması), form davranışları (pending çift-submit engeli, hata görünürlüğü, kimlik alanı yokluğu, 409 çakışma mesajı).
 
 **Coverage kapsamı dışı (bilinçli):** server action'lar ve Supabase SDK wiring'i (`lib/supabase/{client,server}.ts`, `updateSession`) — bunları birim testte doğrulamak tüm SDK'yı mock'lamak (kodu değil mock'u test etmek) demek olur. Bunlar `typecheck` + `build` + (canlı) smoke ile doğrulanır.
 
@@ -109,6 +125,14 @@ Canlı Supabase kabul testi **geçti** (OQ-009/OQ-010 — kapandı; bkz. [docs/o
 - Credential'lar yalnız git-ignored `.env.local` içindedir; bu belgeye ve repository'ye **hiçbir değer kopyalanmaz**.
 - Build, test, lint, typecheck credential'sız da tam çalışır; Supabase yapılandırılmamışsa auth submit kontrollü "yapılandırılmamış" mesajı gösterir.
 
+## Bu aşamada BULUNMAYANLAR (bilinçli)
+
+Rol yönetimi UI/API'si, kullanıcı daveti, team/department, tam RBAC, separation-of-duties
+enforcement (self-approval MVP'de SERBEST), changes_requested, notification delivery,
+dosya/MinIO, analytics, workflow designer, dark mode. Dashboard sayımları **yalnız**
+kullanıcının kendi talep listesi + inbox'ından türetilir (sahte KPI/yeni analytics
+endpoint'i yok).
+
 ## Sonraki aşama
 
-**Purchase Request dikey dilimi:** form → tutar eşiği koşulu → sıralı onay → görev inbox → audit timeline. Dashboard şu an **gerçek business verisi içermez** (sahte liste/istatistik yok).
+Canlı uçtan uca kabul testi → hata düzeltmeleri → deployment/pilot hazırlığı.

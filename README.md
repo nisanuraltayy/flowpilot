@@ -48,11 +48,17 @@ için kullanılır (service role key ve Supabase SDK'sı yok); browser'dan hiçb
 business tablosuna erişilmez — veri yalnız FastAPI üzerinden yönetilir.
 
 Tenant izolasyonu PostgreSQL RLS (ENABLE + FORCE) ile gerçek veritabanı
-testlerinde kanıtlanmıştır. Alembic history: `0001`–`0005`. Roller:
+testlerinde kanıtlanmıştır. Alembic history: `0001`–`0006`. Roller:
 `flowpilot_app`/`flowpilot_migrator` (ikisi de BYPASSRLS'siz).
 
-Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, notification delivery,
-`Dockerfile`, Purchase Request / inbox / timeline frontend ekranları.
+Frontend, Purchase Request + kişisel onay kutusu + audit timeline akışını uçtan uca
+sunar ([apps/web](apps/web/README.md)): giriş → aktif org çöz/seç → talep oluştur →
+taleplerim → onay kutusu → onayla/reddet → durum + timeline. Aktif org, HttpOnly
+cookie'de tutulur ama **authorization kaynağı değildir** (her istekte membership
+yeniden doğrulanır).
+
+Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, rol yönetimi UI/API, notification
+delivery, `Dockerfile`, dark mode.
 
 Backend domain kodu `identity`, `organization`, **`workflow_runtime` (Epic E09 —
 production runtime core: definition versioning + immutable version, instance/task/event

@@ -272,14 +272,17 @@ Bilinçli olarak yok:
 - Public workflow runtime API'si (runtime application servisi yalnız içeriden çağrılır)
 
 **Var olan domain kodu:** `identity` (minimal User), `organization`
-(Organization/Membership + CreateOrganization + MembershipQuery), **`workflow_runtime`
-(Epic E09 — production runtime core: definition versioning, instance/task/event lifecycle,
-transactional outbox + idempotent inbox, persisted timer, RLS, task assignee pinning;
-`WorkflowRuntimePort` arkasında)**, **`purchase_request` (Create → workflow → sıralı onay →
-timeline; `POST`/`GET`/`GET .../timeline` ve liste endpoint'leri)**, **`approval` (role
-assignment provisioning + atomik karar use-case + kişisel inbox; `POST /v1/organizations/
-{id}/tasks/{task_id}/decision`, `GET .../tasks/inbox`)** ve **`audit` (append-only writer +
-timeline read model)** — migration `0005`. Karar akışı, runtime task transition + PR status +
-ApprovalDecision + audit'i cross-module ATOMİK (compose UnitOfWork, `api/wiring.py`) commit
-eder. Worker `--check` + `--run-once` / `--run` dispatch modlarını destekler. Diğer 7 bounded
-context paketi hâlâ boştur. Purchase Request + inbox + timeline frontend'i sonraki aşamada.
+(Organization/Membership + CreateOrganization + MembershipQuery; `GET /v1/organizations`,
+**`GET /v1/me/organizations`** — actor'ın aktif organizasyonları, actor-scoped RLS),
+**`workflow_runtime` (Epic E09 — production runtime core: definition versioning, instance/
+task/event lifecycle, transactional outbox + idempotent inbox, persisted timer, RLS, task
+assignee pinning; `WorkflowRuntimePort` arkasında)**, **`purchase_request` (Create → workflow
+→ sıralı onay → timeline; `POST`/`GET`/`GET .../timeline` ve liste endpoint'leri)**,
+**`approval` (role assignment provisioning + atomik karar use-case + kişisel inbox; `POST
+/v1/organizations/{id}/tasks/{task_id}/decision`, `GET .../tasks/inbox`)** ve **`audit`
+(append-only writer + timeline read model)** — migration `0006` (0006: `/v1/me/organizations`
+için actor-scoped membership SELECT policy, owner-approved; ASM-0017). Karar akışı, runtime
+task transition + PR status + ApprovalDecision + audit'i cross-module ATOMİK (compose
+UnitOfWork, `api/wiring.py`) commit eder. Worker `--check` + `--run-once` / `--run` dispatch
+modlarını destekler. Diğer 7 bounded context paketi hâlâ boştur. Purchase Request + inbox +
+timeline **web arayüzü** ([apps/web](../web/README.md)) bu aşamada eklendi.

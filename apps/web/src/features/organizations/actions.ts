@@ -16,6 +16,7 @@ import {
   errorResult,
   SUPABASE_NOT_CONFIGURED_MESSAGE,
 } from "@/features/auth/action-result";
+import { writeActiveOrganizationCookie } from "@/features/organizations/context";
 import { organizationNameSchema } from "@/features/organizations/schemas";
 import { createOrganization } from "@/lib/api/flowpilot-api";
 import { createClient } from "@/lib/supabase/server";
@@ -67,6 +68,9 @@ export async function createOrganizationAction(
 
   switch (outcome.kind) {
     case "created":
+      // Yeni organizasyon oluşturulunca aktif org context'i olarak yazılır
+      // (owner #4/#5 tek-kullanıcı akışının doğrudan dashboard'a geçebilmesi için).
+      await writeActiveOrganizationCookie(outcome.organization.organizationId);
       return {
         status: "success",
         organizationId: outcome.organization.organizationId,
