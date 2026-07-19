@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { AppShell } from "@/components/app-shell";
 import { Alert } from "@/components/alert";
+import { AppShell } from "@/components/app-shell";
+import { ButtonLink } from "@/components/button";
 import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import {
-  getUserEmail,
-  requireActiveOrganization,
-} from "@/features/organizations/context";
+import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
 import { PurchaseRequestList } from "@/features/purchase-requests/purchase-request-list";
 import { listMyPurchaseRequests } from "@/lib/api/resources";
 
@@ -31,30 +29,23 @@ export default async function PurchaseRequestsPage() {
       organizationName={context.organization.name}
       activeNav="requests"
     >
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Taleplerim</h1>
-        <Link
-          href="/purchase-requests/new"
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-        >
-          Yeni talep
-        </Link>
-      </div>
+      <PageHeader
+        title="Taleplerim"
+        description="Oluşturduğun satın alma talepleri ve güncel onay durumları."
+        action={<ButtonLink href="/purchase-requests/new">+ Yeni talep</ButtonLink>}
+      />
 
-      <div className="mt-6">
-        {outcome.kind !== "ok" ? (
-          <Alert tone="error">
-            Talepler şu anda getirilemedi. Lütfen sayfayı yenileyin.
-          </Alert>
-        ) : outcome.data.length === 0 ? (
-          <EmptyState
-            title="Henüz satın alma talebin yok"
-            description="İlk talebini oluşturarak onay sürecini başlatabilirsin."
-          />
-        ) : (
-          <PurchaseRequestList items={outcome.data} />
-        )}
-      </div>
+      {outcome.kind !== "ok" ? (
+        <Alert tone="error">Talepler şu anda getirilemedi. Lütfen sayfayı yenileyin.</Alert>
+      ) : outcome.data.length === 0 ? (
+        <EmptyState
+          title="Henüz satın alma talebin yok"
+          description="İlk talebini oluşturarak onay sürecini başlatabilirsin."
+          action={<ButtonLink href="/purchase-requests/new">Yeni talep oluştur</ButtonLink>}
+        />
+      ) : (
+        <PurchaseRequestList items={outcome.data} />
+      )}
     </AppShell>
   );
 }

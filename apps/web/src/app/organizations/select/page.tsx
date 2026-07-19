@@ -30,7 +30,7 @@ export default async function SelectOrganizationPage() {
       />
       <p className="mt-4 text-center text-xs text-slate-500">
         Yeni bir organizasyon mu kuracaksın?{" "}
-        <Link href="/onboarding/organization" className="font-medium text-blue-600 underline">
+        <Link href="/onboarding/organization" className="font-medium text-brand-600 underline">
           Organizasyon oluştur
         </Link>
       </p>

@@ -11,7 +11,7 @@ interface AlertProps {
 const TONE_STYLES: Record<AlertProps["tone"], { box: string; icon: string }> = {
   error: { box: "border-red-200 bg-red-50 text-red-800", icon: "⚠" },
   success: { box: "border-green-200 bg-green-50 text-green-800", icon: "✓" },
-  info: { box: "border-blue-200 bg-blue-50 text-blue-800", icon: "ℹ" },
+  info: { box: "border-brand-200 bg-brand-50 text-brand-800", icon: "ℹ" },
 };
 
 export function Alert({ tone, children }: AlertProps) {

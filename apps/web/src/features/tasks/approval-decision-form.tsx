@@ -3,11 +3,10 @@
 /**
  * Onay kararı formu (approve / reject + isteğe bağlı yorum).
  *
- * - Onay ve ret görsel olarak net ayrılır (ikon + metin + kenar rengi) — yalnız
- *   renkle değil.
+ * - Onay ve ret görsel olarak net ayrılır (ikon + metin + kenar/renk) — yalnız renkle değil.
  * - Pending sırasında iki buton da disabled → çift submit engellenir.
  * - Optimistic UI YOK: karar backend'de onaylanır; başarıda action talep detayına
- *   yönlendirir. Hata (ör. 409 çakışma) satır içi güvenli mesaj olarak gösterilir.
+ *   yönlendirir. Hata (ör. 409 çakışma / ağ) satır içi güvenli mesaj olarak gösterilir.
  */
 
 import Link from "next/link";
@@ -15,6 +14,8 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { Alert } from "@/components/alert";
+import { buttonClasses } from "@/components/button";
+import { CheckIcon, XIcon } from "@/components/icons";
 import type { DecideTaskResult } from "@/features/tasks/actions";
 
 interface ApprovalDecisionFormProps {
@@ -30,26 +31,28 @@ const IDLE: DecideTaskResult = { status: "idle" };
 function DecisionButtons() {
   const { pending } = useFormStatus();
   return (
-    <div className="flex flex-wrap gap-2">
-      <button
-        type="submit"
-        name="decision"
-        value="approve"
-        disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-green-300"
-      >
-        <span aria-hidden="true">✓</span>
-        {pending ? "Gönderiliyor…" : "Onayla"}
-      </button>
+    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
       <button
         type="submit"
         name="decision"
         value="reject"
         disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        aria-busy={pending}
+        className={buttonClasses("danger", "md")}
       >
-        <span aria-hidden="true">✕</span>
+        <XIcon className="h-4 w-4" />
         {pending ? "Gönderiliyor…" : "Reddet"}
+      </button>
+      <button
+        type="submit"
+        name="decision"
+        value="approve"
+        disabled={pending}
+        aria-busy={pending}
+        className={buttonClasses("success", "md")}
+      >
+        <CheckIcon className="h-4 w-4" />
+        {pending ? "Gönderiliyor…" : "Onayla"}
       </button>
     </div>
   );
@@ -85,8 +88,8 @@ export function ApprovalDecisionForm({ taskId, action }: ApprovalDecisionFormPro
           name="comment"
           rows={2}
           maxLength={2000}
-          placeholder="Kararınıza ilişkin not"
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          placeholder="Kararınıza ilişkin kısa bir not ekleyebilirsiniz"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
         />
       </div>
 
