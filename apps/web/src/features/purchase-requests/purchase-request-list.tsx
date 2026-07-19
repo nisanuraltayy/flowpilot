@@ -1,14 +1,16 @@
 /**
  * "Taleplerim" listesi — masaüstünde temiz tablo, mobilde okunabilir kartlar.
- * Durum StatusBadge, rol RoleBadge, tutar MoneyDisplay ile; UUID gösterilmez.
- * Sayfa yatay taşmaz (tablo kendi kapsayıcısında `overflow-x-auto`).
+ * Durum StatusBadge; süreç için kompakt ProcessStatusIndicator (yalnız mevcut
+ * status + current_approval_role'dan güvenli türetilir — zincir uydurulmaz).
+ * Tutar MoneyDisplay; UUID gösterilmez; sayfa yatay taşmaz.
  */
 
 import Link from "next/link";
 
 import { MoneyDisplay } from "@/components/money-display";
-import { RoleBadge } from "@/components/role-badge";
+import { ProcessStatusIndicator } from "@/components/process-status-indicator";
 import { StatusBadge } from "@/components/status-badge";
+import { processStatusChip } from "@/features/purchase-requests/workflow-view";
 import { formatDateTime } from "@/lib/datetime";
 import type { PurchaseRequestListItem } from "@/lib/api/resources";
 
@@ -28,7 +30,7 @@ export function PurchaseRequestList({ items }: PurchaseRequestListProps) {
                 <th scope="col" className="px-4 py-3">Talep</th>
                 <th scope="col" className="px-4 py-3">Tutar</th>
                 <th scope="col" className="px-4 py-3">Durum</th>
-                <th scope="col" className="px-4 py-3">Bekleyen adım</th>
+                <th scope="col" className="px-4 py-3">Süreç</th>
                 <th scope="col" className="px-4 py-3">Oluşturuldu</th>
                 <th scope="col" className="px-4 py-3"><span className="sr-only">Detay</span></th>
               </tr>
@@ -42,7 +44,9 @@ export function PurchaseRequestList({ items }: PurchaseRequestListProps) {
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
                   <td className="px-4 py-3">
-                    <RoleBadge role={item.currentApprovalRole} /> {item.currentApprovalRole === null ? <span className="text-slate-400">—</span> : null}
+                    <ProcessStatusIndicator
+                      chip={processStatusChip(item.status, item.currentApprovalRole)}
+                    />
                   </td>
                   <td className="px-4 py-3 text-slate-500">
                     <time dateTime={item.createdAt}>{formatDateTime(item.createdAt)}</time>
@@ -68,7 +72,7 @@ export function PurchaseRequestList({ items }: PurchaseRequestListProps) {
           <li key={item.purchaseRequestId}>
             <Link
               href={`/purchase-requests/${item.purchaseRequestId}`}
-              className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+              className="flex flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
             >
               <div className="flex items-start justify-between gap-3">
                 <span className="text-sm font-semibold text-slate-900">{item.title}</span>
@@ -76,11 +80,13 @@ export function PurchaseRequestList({ items }: PurchaseRequestListProps) {
               </div>
               <div className="flex items-center justify-between gap-3">
                 <MoneyDisplay amountMinor={item.amountMinor} className="text-sm font-medium text-slate-900" />
-                <RoleBadge role={item.currentApprovalRole} />
+                <time dateTime={item.createdAt} className="text-xs text-slate-500">
+                  {formatDateTime(item.createdAt)}
+                </time>
               </div>
-              <time dateTime={item.createdAt} className="text-xs text-slate-500">
-                {formatDateTime(item.createdAt)}
-              </time>
+              <ProcessStatusIndicator
+                chip={processStatusChip(item.status, item.currentApprovalRole)}
+              />
             </Link>
           </li>
         ))}

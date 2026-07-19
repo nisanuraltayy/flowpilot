@@ -8,7 +8,9 @@ import { RoleBadge } from "@/components/role-badge";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { StatusBadge } from "@/components/status-badge";
 import { Timeline } from "@/components/timeline";
+import { WorkflowRail } from "@/components/workflow-rail";
 import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
+import { buildProcessSteps } from "@/features/purchase-requests/workflow-view";
 import { formatDateTime } from "@/lib/datetime";
 import { getPurchaseRequest, getPurchaseRequestTimeline } from "@/lib/api/resources";
 
@@ -59,6 +61,7 @@ export default async function PurchaseRequestDetailPage({ params }: PageProps) {
 
   const detail = detailOutcome.data;
   const timeline = timelineOutcome.kind === "ok" ? timelineOutcome.data : [];
+  const processSteps = buildProcessSteps(timeline);
 
   return (
     <AppShell
@@ -126,9 +129,17 @@ export default async function PurchaseRequestDetailPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Süreç */}
+        {/* Süreç akışı (özet rail — timeline'dan türetilir) */}
+        {processSteps.length > 1 ? (
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <h2 className="mb-4 text-sm font-semibold text-slate-900">Onay akışı</h2>
+            <WorkflowRail steps={processSteps} ariaLabel="Talebin onay akışı" />
+          </section>
+        ) : null}
+
+        {/* Süreç zaman çizelgesi (kronolojik detay) */}
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <h2 className="mb-4 text-sm font-semibold text-slate-900">Süreç zaman çizelgesi</h2>
+          <h2 className="mb-4 text-sm font-semibold text-slate-900">Zaman çizelgesi</h2>
           <Timeline items={timeline} />
         </section>
       </div>

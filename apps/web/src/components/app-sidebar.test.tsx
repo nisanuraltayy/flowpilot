@@ -33,4 +33,18 @@ describe("AppSidebar", () => {
     );
     expect(container.textContent).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/i);
   });
+
+  it("uzun e-posta ve organizasyon adı taşmaz (truncate + title)", () => {
+    const longEmail = "cok.uzun.bir.eposta.adresi.demo.kullanici@ornek-sirket-alan-adi.example.com";
+    const longOrg = "Çok Uzun Bir Organizasyon Adı Anonim Şirketi ve Ortakları Limited";
+    render(<AppSidebar userEmail={longEmail} organizationName={longOrg} activeNav="overview" />);
+
+    const emailEl = screen.getByText(longEmail);
+    expect(emailEl).toHaveClass("truncate");
+    expect(emailEl).toHaveAttribute("title", longEmail);
+
+    const orgEl = screen.getByText(longOrg);
+    expect(orgEl).toHaveClass("truncate");
+    expect(orgEl).toHaveAttribute("title", longOrg);
+  });
 });

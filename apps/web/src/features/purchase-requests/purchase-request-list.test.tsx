@@ -18,13 +18,14 @@ const ITEMS: PurchaseRequestListItem[] = [
 ];
 
 describe("PurchaseRequestList", () => {
-  it("başlık, tutar (TL), durum ve rolü gösterir", () => {
+  it("başlık, tutar (TL), durum ve güvenli süreç göstergesini gösterir", () => {
     render(<PurchaseRequestList items={ITEMS} />);
     // Masaüstü tablo + mobil kart aynı DOM'da olduğundan getAllByText.
     expect(screen.getAllByText("Dizüstü bilgisayar").length).toBeGreaterThan(0);
     expect(screen.getAllByText("12.500,50 ₺").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Onay bekliyor").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Ekip yöneticisi").length).toBeGreaterThan(0);
+    // Süreç göstergesi in_approval + team_manager'dan güvenli türetilir.
+    expect(screen.getAllByText("Ekip yöneticisi onayında").length).toBeGreaterThan(0);
   });
 
   it("detay bağlantısı doğru talebe gider", () => {

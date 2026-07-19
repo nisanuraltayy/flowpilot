@@ -7,11 +7,20 @@ import { EmptyState } from "@/components/empty-state";
 import { CheckIcon, DocumentsIcon, InboxIcon, XIcon } from "@/components/icons";
 import { MetricCard } from "@/components/metric-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
+import { WorkflowRail, type WorkflowStepData } from "@/components/workflow-rail";
 import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
 import { PurchaseRequestList } from "@/features/purchase-requests/purchase-request-list";
 import { getMyTaskInbox, listMyPurchaseRequests } from "@/lib/api/resources";
 
 export const metadata: Metadata = { title: "Genel Bakış" };
+
+/** Hero'daki DEKORATİF örnek akış (gerçek veri/sonuç değil — yalnız görsel dil). */
+const EXAMPLE_FLOW: readonly WorkflowStepData[] = [
+  { key: "req", label: "Talep", state: "completed" },
+  { key: "tm", label: "Ekip yöneticisi", state: "completed" },
+  { key: "fin", label: "Finans", state: "active" },
+  { key: "res", label: "Sonuç", sublabel: "Bekliyor", state: "upcoming" },
+];
 
 /**
  * Satış demosunun ilk ekranı. Sayımlar YALNIZ kullanıcının kendi talep listesinden
@@ -42,18 +51,25 @@ export default async function DashboardPage() {
       organizationName={context.organization.name}
       activeNav="overview"
     >
-      {/* Hero */}
-      <section className="mb-6 overflow-hidden rounded-2xl bg-brand-900 px-6 py-7 text-white sm:px-8">
-        <p className="text-sm font-medium text-brand-200">{context.organization.name}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Genel Bakış</h1>
-        <p className="mt-2 max-w-xl text-sm text-brand-100/90">
-          Satın alma taleplerini oluştur, kurala göre yönlendir ve onayları tek yerden,
-          denetlenebilir biçimde yürüt.
-        </p>
-        <div className="mt-5">
-          <ButtonLink href="/purchase-requests/new" variant="secondary">
-            + Yeni talep oluştur
-          </ButtonLink>
+      {/* Hero — açık, premium yüzey (yoğun mor blok değil) */}
+      <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:p-7">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-md">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Genel Bakış</h1>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Talepleri kurala göre yönlendir, onayları adım adım ve denetlenebilir biçimde yürüt.
+            </p>
+            <div className="mt-4">
+              <ButtonLink href="/purchase-requests/new">+ Yeni talep oluştur</ButtonLink>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-4 lg:w-80 lg:shrink-0">
+            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-400">
+              Örnek onay akışı
+            </p>
+            <WorkflowRail steps={EXAMPLE_FLOW} ariaLabel="Örnek onay akışı" />
+          </div>
         </div>
       </section>
 

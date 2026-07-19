@@ -23,11 +23,12 @@ const ITEMS: InboxItem[] = [
 ];
 
 describe("TaskInboxList", () => {
-  it("görev başlığını, tutarı ve gereken rolü gösterir + karar butonları", () => {
+  it("görevi aktif adım olarak sunar: 'Sıra sende' bağlamı + başlık + tutar + karar butonları", () => {
     render(<TaskInboxList items={ITEMS} />);
     expect(screen.getByText("Sunucu yenileme")).toBeInTheDocument();
     expect(screen.getByText("60.000,00 ₺")).toBeInTheDocument();
-    expect(screen.getByText("Finans")).toBeInTheDocument();
+    // "Sıra sende" bağlamı, görevin rolüyle birlikte.
+    expect(screen.getByText("Sıra sende — Finans onayı")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Onayla/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Reddet/ })).toBeInTheDocument();
   });

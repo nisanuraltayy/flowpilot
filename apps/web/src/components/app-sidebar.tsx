@@ -54,9 +54,14 @@ export function AppSidebar({ userEmail, organizationName, activeNav }: AppSideba
 
       <div className="border-t border-white/10 pt-4">
         {userEmail ? (
-          <p className="mb-2 truncate px-1 text-xs text-brand-200" title={userEmail}>
-            {userEmail}
-          </p>
+          <div className="mb-2 px-1">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-brand-300/80">
+              Oturum
+            </p>
+            <p className="truncate text-xs text-brand-100" title={userEmail}>
+              {userEmail}
+            </p>
+          </div>
         ) : null}
         <form action={signOutAction}>
           <button
