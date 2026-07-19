@@ -8,6 +8,7 @@ kayıt yoksa VEYA RLS erişimi keserse aynı NotFound'u üretir (varlık sızmaz
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
@@ -69,23 +70,31 @@ class SqlAlchemyDefinitionRepository:
     def ensure_definition(
         self, *, tenant_id: UUID, definition_id: UUID, definition_key: str, created_at: datetime
     ) -> UUID:
+        # Race-safe upsert-get: INSERT ... ON CONFLICT DO NOTHING, sonra SELECT.
+        # Concurrent iki provision aynı definition_id'yi (kazananınkini) döndürür.
+        self._session.execute(
+            text(
+                "INSERT INTO workflow_runtime_definitions "
+                "(id, tenant_id, definition_key, created_at) "
+                "VALUES (:id, :tenant, :key, :now) "
+                "ON CONFLICT (tenant_id, definition_key) DO NOTHING"
+            ),
+            {
+                "id": str(definition_id),
+                "tenant": str(tenant_id),
+                "key": definition_key,
+                "now": created_at,
+            },
+        )
+        self._session.flush()
         existing = self._session.execute(
             select(definitions_table.c.id).where(
                 definitions_table.c.definition_key == definition_key
             )
         ).first()
-        if existing is not None:
-            return cast(UUID, existing[0])
-        self._session.execute(
-            insert(definitions_table).values(
-                id=definition_id,
-                tenant_id=tenant_id,
-                definition_key=definition_key,
-                created_at=created_at,
-            )
-        )
-        self._session.flush()
-        return definition_id
+        if existing is None:  # RLS/görünürlük sorunu — kontrollü hata
+            raise DefinitionVersionNotFoundError("definition ensure sonrası okunamadı")
+        return cast(UUID, existing[0])
 
     def add_version(
         self, version: WorkflowDefinitionVersion, *, tenant_id: UUID, published_at: datetime
@@ -102,6 +111,68 @@ class SqlAlchemyDefinitionRepository:
             )
         )
         self._session.flush()
+
+    def add_version_if_absent(
+        self, version: WorkflowDefinitionVersion, *, tenant_id: UUID, published_at: datetime
+    ) -> bool:
+        result = self._session.execute(
+            text(
+                "INSERT INTO workflow_runtime_definition_versions "
+                "(id, tenant_id, definition_id, version_no, definition, content_hash, "
+                " published_at) "
+                "VALUES (:id, :tenant, :def_id, :no, CAST(:definition AS JSONB), :hash, :now) "
+                "ON CONFLICT (tenant_id, definition_id, version_no) DO NOTHING"
+            ),
+            {
+                "id": str(version.id.value),
+                "tenant": str(tenant_id),
+                "def_id": str(version.definition_id.value),
+                "no": version.version_no,
+                "definition": json.dumps(version.definition, sort_keys=True),
+                "hash": version.content_hash,
+                "now": published_at,
+            },
+        )
+        self._session.flush()
+        return _rowcount(result) == 1
+
+    def find_published_version(
+        self, *, definition_key: str, version_no: int
+    ) -> WorkflowDefinitionVersion | None:
+        row = (
+            self._session.execute(
+                select(
+                    definition_versions_table.c.id,
+                    definition_versions_table.c.definition_id,
+                    definition_versions_table.c.version_no,
+                    definition_versions_table.c.definition,
+                    definition_versions_table.c.content_hash,
+                )
+                .select_from(
+                    definition_versions_table.join(
+                        definitions_table,
+                        definition_versions_table.c.definition_id == definitions_table.c.id,
+                    )
+                )
+                .where(
+                    and_(
+                        definitions_table.c.definition_key == definition_key,
+                        definition_versions_table.c.version_no == version_no,
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            return None
+        return WorkflowDefinitionVersion(
+            id=WorkflowDefinitionVersionId(row["id"]),
+            definition_id=WorkflowDefinitionId(row["definition_id"]),
+            version_no=int(row["version_no"]),
+            definition=cast(dict[str, Any], row["definition"]),
+            content_hash=str(row["content_hash"]),
+        )
 
     def get_version(self, version_id: UUID) -> WorkflowDefinitionVersion:
         row = (

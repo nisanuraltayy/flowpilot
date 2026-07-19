@@ -22,6 +22,9 @@ from flowpilot.modules.identity.infrastructure.persistence.tables import (
 from flowpilot.modules.organization.infrastructure.persistence.tables import (
     metadata as organization_metadata,
 )
+from flowpilot.modules.purchase_request.infrastructure.persistence.tables import (
+    metadata as purchase_request_metadata,
+)
 from flowpilot.modules.workflow_runtime.infrastructure.persistence.tables import (
     metadata as workflow_runtime_metadata,
 )
@@ -32,7 +35,12 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Hand-written migration'lar için; autogenerate ileride bu listeyi kullanır.
-target_metadata = [identity_metadata, organization_metadata, workflow_runtime_metadata]
+target_metadata = [
+    identity_metadata,
+    organization_metadata,
+    workflow_runtime_metadata,
+    purchase_request_metadata,
+]
 
 
 def _resolve_url() -> str:

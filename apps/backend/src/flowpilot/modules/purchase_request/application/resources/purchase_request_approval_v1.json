@@ -1,0 +1,68 @@
+{
+  "workflow_key": "purchase_request_approval",
+  "description": "Satın alma onay akışı v1. Onay eşikleri BU DEFINITION'dadır (Python koduna hard-code EDİLMEZ). Tutarlar minor unit (kuruş) + TRY.",
+  "nodes": [
+    { "id": "start", "type": "start", "next": "purchase_form" },
+    {
+      "id": "purchase_form",
+      "type": "form",
+      "next": "amount_condition",
+      "config": {
+        "fields": [
+          { "name": "title", "type": "string" },
+          { "name": "description", "type": "string" },
+          { "name": "amount_minor", "type": "money_minor_unit" },
+          { "name": "currency", "type": "currency" }
+        ]
+      }
+    },
+    {
+      "id": "amount_condition",
+      "type": "condition",
+      "config": {
+        "branches": [
+          {
+            "branch_id": "under_10k",
+            "when": { "field": "amount_minor", "op": "lt", "value": 1000000, "currency": "TRY" },
+            "next": "approval_team_manager"
+          },
+          {
+            "branch_id": "10k_to_50k",
+            "when": { "field": "amount_minor", "op": "lte", "value": 5000000, "currency": "TRY" },
+            "next": "approval_team_manager_finance"
+          },
+          {
+            "branch_id": "over_50k",
+            "when": { "op": "otherwise" },
+            "next": "approval_full_chain"
+          }
+        ]
+      }
+    },
+    {
+      "id": "approval_team_manager",
+      "type": "sequential_approval",
+      "next": "notify_requester",
+      "config": { "approver_chain": ["team_manager"] }
+    },
+    {
+      "id": "approval_team_manager_finance",
+      "type": "sequential_approval",
+      "next": "notify_requester",
+      "config": { "approver_chain": ["team_manager", "finance"] }
+    },
+    {
+      "id": "approval_full_chain",
+      "type": "sequential_approval",
+      "next": "notify_requester",
+      "config": { "approver_chain": ["team_manager", "finance", "general_manager"] }
+    },
+    {
+      "id": "notify_requester",
+      "type": "notification",
+      "next": "end",
+      "config": { "recipient_role": "requester", "message_key": "purchase_request.decision" }
+    },
+    { "id": "end", "type": "end" }
+  ]
+}

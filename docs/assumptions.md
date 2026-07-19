@@ -200,6 +200,32 @@ Format:
     engeller (missing context → deny, ALL tablolar). Maliyet: çoklu-tenant tarama için
     bir üst-katman scheduler gerekir; bu bilinçli olarak ertelendi.
 
+- id: ASM-0015
+  statement: >
+    Purchase Request kaydı ile workflow instance başlangıcının cross-module
+    ATOMİKLİĞİ, composition root'ta (api/wiring.py) kurulan bir COMPOSE UnitOfWork ile
+    sağlanır: purchase_request ve workflow_runtime infrastructure adapter'ları TEK
+    SQLAlchemy session'ı üzerinde birleşir ve TEK commit/rollback ile yönetilir.
+    workflow_runtime, kod kopyalanmadan `WorkflowRuntimeTransactionPort`
+    (start_instance_tx / submit_form_tx — commit etmez, sağlanan uow üzerinde çalışır)
+    ile katılır. İki bağımsız commit veya distributed transaction YOKTUR.
+  impact: medium
+  reversible: true
+  owner: engineering
+  status: unvalidated
+  validation_method: >
+    Approval decision / task inbox story'lerinde tekrar değerlendirilir: aynı compose
+    pattern approval kararını da atomik kılacak mı, yoksa event-driven (outbox) bir
+    yaklaşım mı tercih edilecek? İkinci modül entegrasyonunda sınır netleşir.
+  expires_at: 2026-12-01
+  affected_stories: [FP-E06-001, FP-E06-002, FP-E06-003]
+  note: >
+    Gerekçe: cross-module infrastructure importu YASAK; ama iki modülün adapter'larını
+    composition root'ta tek session üzerinde compose etmek dependency-rules'a uygundur
+    (wiring yalnız api/deps.py + api/wiring.py'de). PurchaseRequestUnitOfWork port'u
+    workflow_runtime'ın WorkflowUnitOfWork'ünü GENİŞLETİR; provider-neutral sınır korunur.
+    Bkz. [[ASM-0013]] (runtime boundary konsolidasyonu).
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde

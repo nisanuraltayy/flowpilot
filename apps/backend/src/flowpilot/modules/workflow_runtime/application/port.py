@@ -62,13 +62,25 @@ class DefinitionRepository(Protocol):
         self, version: WorkflowDefinitionVersion, *, tenant_id: UUID, published_at: datetime
     ) -> None: ...
 
+    def add_version_if_absent(
+        self, version: WorkflowDefinitionVersion, *, tenant_id: UUID, published_at: datetime
+    ) -> bool:
+        """ON CONFLICT DO NOTHING ile ekler; INSERT olduysa True (concurrent-safe)."""
+        ...
+
     def ensure_definition(
         self, *, tenant_id: UUID, definition_id: UUID, definition_key: str, created_at: datetime
     ) -> UUID:
-        """definition_key için mevcut definition id'yi döndürür; yoksa oluşturur."""
+        """definition_key için mevcut definition id'yi döndürür; yoksa oluşturur (race-safe)."""
         ...
 
     def get_version(self, version_id: UUID) -> WorkflowDefinitionVersion: ...
+
+    def find_published_version(
+        self, *, definition_key: str, version_no: int
+    ) -> WorkflowDefinitionVersion | None:
+        """Verili key + version_no için yayınlanmış version; yoksa None."""
+        ...
 
 
 class InstanceRepository(Protocol):
@@ -197,3 +209,33 @@ class WorkflowRuntimePort(Protocol):
     def run_dispatch_pass(
         self, *, tenant_id: UUID, worker_id: str, now: datetime | None = None, limit: int = 20
     ) -> DispatchStats: ...
+
+
+class WorkflowRuntimeProvisioningPort(Protocol):
+    """Idempotent workflow definition provisioning (public HTTP endpoint DEĞİL).
+
+    Visual designer / publish endpoint yokken tenant başına varsayılan definition'ı
+    idempotent + concurrent-safe kurar. Aynı key/version farklı hash ile sessizce
+    OVERWRITE edilmez (DefinitionValidationError). Kendi transaction'ını yönetir.
+    """
+
+    def ensure_published_definition(
+        self, command: PublishDefinitionCommand
+    ) -> PublishDefinitionResult: ...
+
+
+class WorkflowRuntimeTransactionPort(Protocol):
+    """Cross-module ATOMİK compose için transaction-aware runtime yüzeyi.
+
+    Metotlar SAĞLANAN `WorkflowUnitOfWork` üzerinde çalışır; COMMIT ETMEZ ve
+    context set etmez (çağıran tek transaction'ı yönetir). Böylece Purchase Request
+    + workflow instance start AYNI transaction'da commit edilir — kod kopyalamadan.
+    """
+
+    def start_instance_tx(
+        self, uow: WorkflowUnitOfWork, command: StartInstanceCommand
+    ) -> InstanceView: ...
+
+    def submit_form_tx(
+        self, uow: WorkflowUnitOfWork, command: SubmitFormCommand
+    ) -> InstanceView: ...

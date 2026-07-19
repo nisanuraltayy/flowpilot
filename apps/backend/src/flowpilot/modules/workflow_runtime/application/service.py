@@ -39,7 +39,10 @@ from flowpilot.modules.workflow_runtime.domain.enums import (
     WorkflowNodeType,
     WorkflowTaskStatus,
 )
-from flowpilot.modules.workflow_runtime.domain.errors import InvalidTransitionError
+from flowpilot.modules.workflow_runtime.domain.errors import (
+    DefinitionValidationError,
+    InvalidTransitionError,
+)
 from flowpilot.modules.workflow_runtime.domain.event import IntegrationEvent, WorkflowEvent
 from flowpilot.modules.workflow_runtime.domain.identifiers import (
     WorkflowDefinitionId,
@@ -113,145 +116,213 @@ class WorkflowRuntimeService:
             content_hash=version.content_hash,
         )
 
-    # ------------------------------------------------------------ start
+    # ------------------------------------------------------- provisioning
 
-    def start_instance(self, command: StartInstanceCommand) -> InstanceView:
+    def ensure_published_definition(
+        self, command: PublishDefinitionCommand
+    ) -> PublishDefinitionResult:
+        """Idempotent + concurrent-safe provisioning (visual designer/endpoint yok).
+
+        Mevcut published version varsa yeniden kullanır; aynı key/version farklı hash
+        ile SESSİZCE OVERWRITE edilmez (DefinitionValidationError). version_no = 1.
+        """
+        version_no = 1
+        candidate = WorkflowDefinitionVersion.publish(
+            id=WorkflowDefinitionVersionId(self._ids.new_uuid()),
+            definition_id=WorkflowDefinitionId(self._ids.new_uuid()),
+            version_no=version_no,
+            definition=command.definition,
+        )
         now = self._clock.now()
-        tenant = TenantId(command.tenant_id)
         with self._uow_factory() as uow:
             uow.set_actor_context(command.actor_user_id)
             uow.set_tenant_context(command.tenant_id)
-            version = uow.definitions.get_version(command.definition_version_id)
-            start_node = version.start_node()
-            form_node_id = str(start_node["next"])
+            existing = uow.definitions.find_published_version(
+                definition_key=command.definition_key, version_no=version_no
+            )
+            if existing is not None:
+                self._assert_same_hash(existing, candidate)
+                uow.rollback()
+                return _version_result(existing)
 
-            instance = WorkflowInstance(
-                id=WorkflowInstanceId(self._ids.new_uuid()),
-                tenant_id=tenant,
-                definition_version_id=version.id,
-                definition_hash=version.content_hash,
-                status=WorkflowInstanceStatus.WAITING,
-                current_node_id=form_node_id,
-                context={**command.initial_context, "requester_id": str(command.actor_user_id)},
-                version=1,
+            definition_id = uow.definitions.ensure_definition(
+                tenant_id=command.tenant_id,
+                definition_id=candidate.definition_id.value,
+                definition_key=command.definition_key,
+                created_at=now,
             )
-            uow.instances.add(instance, now=now)
-            self._append_event(
-                uow,
-                tenant=tenant,
-                instance_id=instance.id,
-                event_type="instance.started",
-                node_id=str(start_node["id"]),
-                actor_type="user",
-                now=now,
-                detail={"definition_version_id": str(version.id.value)},
+            to_publish = WorkflowDefinitionVersion(
+                id=candidate.id,
+                definition_id=WorkflowDefinitionId(definition_id),
+                version_no=version_no,
+                definition=candidate.definition,
+                content_hash=candidate.content_hash,
             )
-            self._enqueue(
-                uow,
-                tenant=tenant,
-                event_type="instance.started.v1",
-                payload={"instance_id": str(instance.id.value), "tenant_id": str(tenant.value)},
-                now=now,
+            uow.definitions.add_version_if_absent(
+                to_publish, tenant_id=command.tenant_id, published_at=now
             )
+            stored = uow.definitions.find_published_version(
+                definition_key=command.definition_key, version_no=version_no
+            )
+            if stored is None:  # yalnız RLS/görünürlük anomalisinde
+                raise DefinitionValidationError("provisioning sonrası version okunamadı")
+            self._assert_same_hash(stored, candidate)
             uow.commit()
+        return _version_result(stored)
+
+    @staticmethod
+    def _assert_same_hash(
+        stored: WorkflowDefinitionVersion, candidate: WorkflowDefinitionVersion
+    ) -> None:
+        if stored.content_hash != candidate.content_hash:
+            raise DefinitionValidationError(
+                "aynı key/version farklı içerik hash'i ile yayınlanamaz (silent overwrite yok)"
+            )
+
+    # ------------------------------------------------------------ start
+
+    def start_instance(self, command: StartInstanceCommand) -> InstanceView:
+        with self._uow_factory() as uow:
+            uow.set_actor_context(command.actor_user_id)
+            uow.set_tenant_context(command.tenant_id)
+            view = self.start_instance_tx(uow, command)
+            uow.commit()
+        return view
+
+    def start_instance_tx(
+        self, uow: WorkflowUnitOfWork, command: StartInstanceCommand
+    ) -> InstanceView:
+        """Instance başlatma domain işi — SAĞLANAN uow üzerinde, COMMIT ETMEZ.
+
+        Context çağıran tarafından set edilir (cross-module compose transaction).
+        """
+        now = self._clock.now()
+        tenant = TenantId(command.tenant_id)
+        version = uow.definitions.get_version(command.definition_version_id)
+        start_node = version.start_node()
+        form_node_id = str(start_node["next"])
+
+        instance = WorkflowInstance(
+            id=WorkflowInstanceId(self._ids.new_uuid()),
+            tenant_id=tenant,
+            definition_version_id=version.id,
+            definition_hash=version.content_hash,
+            status=WorkflowInstanceStatus.WAITING,
+            current_node_id=form_node_id,
+            context={**command.initial_context, "requester_id": str(command.actor_user_id)},
+            version=1,
+        )
+        uow.instances.add(instance, now=now)
+        self._append_event(
+            uow,
+            tenant=tenant,
+            instance_id=instance.id,
+            event_type="instance.started",
+            node_id=str(start_node["id"]),
+            actor_type="user",
+            now=now,
+            detail={"definition_version_id": str(version.id.value)},
+        )
+        self._enqueue(
+            uow,
+            tenant=tenant,
+            event_type="instance.started.v1",
+            payload={"instance_id": str(instance.id.value), "tenant_id": str(tenant.value)},
+            now=now,
+        )
         return self._view(instance, active_task=None)
 
     # ------------------------------------------------------------ submit form
 
     def submit_form(self, command: SubmitFormCommand) -> InstanceView:
-        now = self._clock.now()
-        tenant = TenantId(command.tenant_id)
         with self._uow_factory() as uow:
             uow.set_actor_context(command.actor_user_id)
             uow.set_tenant_context(command.tenant_id)
-            instance = uow.instances.get(command.instance_id)
-            instance.guard_not_terminal()
-            version = uow.definitions.get_version(instance.definition_version_id.value)
-            form_node = version.node(instance.current_node_id)
-            if (
-                instance.status is not WorkflowInstanceStatus.WAITING
-                or form_node["type"] != WorkflowNodeType.FORM.value
-            ):
-                raise InvalidTransitionError(
-                    f"form bu durumda gönderilemez: status={instance.status.value}, "
-                    f"node={form_node['type']}"
-                )
+            view = self.submit_form_tx(uow, command)
+            uow.commit()
+        return view
 
-            amount = command.form_data.get("amount_minor")
-            currency = command.form_data.get("currency")
-            if (
-                not isinstance(amount, int)
-                or isinstance(amount, bool)
-                or not isinstance(currency, str)
-            ):
-                raise InvalidTransitionError(
-                    "tutar minor unit (int) + currency (str) çifti olarak zorunludur"
-                )
-
-            merged_context: dict[str, Any] = {**instance.context, **command.form_data}
-            condition_node = version.node(str(form_node["next"]))
-            selection = conditions.evaluate(
-                list(condition_node["config"]["branches"]), merged_context
-            )
-            approval_node = version.node(selection.next_node_id)
-            chain = [str(role) for role in approval_node["config"]["approver_chain"]]
-
-            # Optimistic guard ÖNCE: eşzamanlı iki submit'i version CAS serialize eder.
-            advanced = instance.advance_waiting(
-                node_id=str(approval_node["id"]), context=merged_context, now=now
-            )
-            uow.instances.update_checked(
-                advanced, expected_version=command.expected_version, now=now
+    def submit_form_tx(self, uow: WorkflowUnitOfWork, command: SubmitFormCommand) -> InstanceView:
+        """Form gönderimi + koşul + ilk approval task — SAĞLANAN uow, COMMIT ETMEZ."""
+        now = self._clock.now()
+        tenant = TenantId(command.tenant_id)
+        instance = uow.instances.get(command.instance_id)
+        instance.guard_not_terminal()
+        version = uow.definitions.get_version(instance.definition_version_id.value)
+        form_node = version.node(instance.current_node_id)
+        if (
+            instance.status is not WorkflowInstanceStatus.WAITING
+            or form_node["type"] != WorkflowNodeType.FORM.value
+        ):
+            raise InvalidTransitionError(
+                f"form bu durumda gönderilemez: status={instance.status.value}, "
+                f"node={form_node['type']}"
             )
 
-            active_task: WorkflowTask | None = None
-            for index, role in enumerate(chain):
-                task = WorkflowTask(
-                    id=WorkflowTaskId(self._ids.new_uuid()),
-                    tenant_id=tenant,
-                    instance_id=instance.id,
-                    node_id=str(approval_node["id"]),
-                    step_index=index,
-                    approver_role=role,
-                    status=WorkflowTaskStatus.ACTIVE if index == 0 else WorkflowTaskStatus.PENDING,
-                    version=1,
-                )
-                uow.tasks.add(task, now=now)
-                if index == 0:
-                    active_task = task
+        amount = command.form_data.get("amount_minor")
+        currency = command.form_data.get("currency")
+        if not isinstance(amount, int) or isinstance(amount, bool) or not isinstance(currency, str):
+            raise InvalidTransitionError(
+                "tutar minor unit (int) + currency (str) çifti olarak zorunludur"
+            )
 
-            for node, detail in (
-                (form_node, {"fields": sorted(command.form_data)}),
-                (
-                    condition_node,
-                    {"branch": selection.branch_id, "explanation": selection.explanation},
-                ),
-                (approval_node, {"chain": chain, "activated_step_index": 0}),
-            ):
-                self._append_event(
-                    uow,
-                    tenant=tenant,
-                    instance_id=instance.id,
-                    event_type=f"node.executed.{node['type']}",
-                    node_id=str(node["id"]),
-                    actor_type="user" if node is form_node else "system",
-                    now=now,
-                    detail=detail,
-                )
-            self._enqueue(
+        merged_context: dict[str, Any] = {**instance.context, **command.form_data}
+        condition_node = version.node(str(form_node["next"]))
+        selection = conditions.evaluate(list(condition_node["config"]["branches"]), merged_context)
+        approval_node = version.node(selection.next_node_id)
+        chain = [str(role) for role in approval_node["config"]["approver_chain"]]
+
+        # Optimistic guard ÖNCE: eşzamanlı iki submit'i version CAS serialize eder.
+        advanced = instance.advance_waiting(
+            node_id=str(approval_node["id"]), context=merged_context, now=now
+        )
+        uow.instances.update_checked(advanced, expected_version=command.expected_version, now=now)
+
+        active_task: WorkflowTask | None = None
+        for index, role in enumerate(chain):
+            task = WorkflowTask(
+                id=WorkflowTaskId(self._ids.new_uuid()),
+                tenant_id=tenant,
+                instance_id=instance.id,
+                node_id=str(approval_node["id"]),
+                step_index=index,
+                approver_role=role,
+                status=WorkflowTaskStatus.ACTIVE if index == 0 else WorkflowTaskStatus.PENDING,
+                version=1,
+            )
+            uow.tasks.add(task, now=now)
+            if index == 0:
+                active_task = task
+
+        for node, detail in (
+            (form_node, {"fields": sorted(command.form_data)}),
+            (condition_node, {"branch": selection.branch_id, "explanation": selection.explanation}),
+            (approval_node, {"chain": chain, "activated_step_index": 0}),
+        ):
+            self._append_event(
                 uow,
                 tenant=tenant,
-                event_type="instance.form_submitted.v1",
-                payload={
-                    "instance_id": str(instance.id.value),
-                    "tenant_id": str(tenant.value),
-                    "branch": selection.branch_id,
-                },
+                instance_id=instance.id,
+                event_type=f"node.executed.{node['type']}",
+                node_id=str(node["id"]),
+                actor_type="user" if node is form_node else "system",
                 now=now,
+                detail=detail,
             )
-            uow.commit()
-        view = self._view(advanced, active_task=active_task)
-        return _with_explanation(view, selection.explanation)
+        self._enqueue(
+            uow,
+            tenant=tenant,
+            event_type="instance.form_submitted.v1",
+            payload={
+                "instance_id": str(instance.id.value),
+                "tenant_id": str(tenant.value),
+                "branch": selection.branch_id,
+            },
+            now=now,
+        )
+        return _with_explanation(
+            self._view(advanced, active_task=active_task), selection.explanation
+        )
 
     # ------------------------------------------------------------ decide task
 
@@ -670,6 +741,15 @@ class WorkflowRuntimeService:
 
 
 _CONSUMER = "workflow-runtime-worker"
+
+
+def _version_result(version: WorkflowDefinitionVersion) -> PublishDefinitionResult:
+    return PublishDefinitionResult(
+        definition_id=version.definition_id.value,
+        definition_version_id=version.id.value,
+        version_no=version.version_no,
+        content_hash=version.content_hash,
+    )
 
 
 def _with_explanation(view: InstanceView, explanation: str) -> InstanceView:

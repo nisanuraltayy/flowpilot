@@ -119,6 +119,7 @@ def tenant_b() -> UUID:
 
 
 _TRUNCATE_TABLES = (
+    "purchase_request_requests",
     "workflow_runtime_inbox",
     "workflow_runtime_timers",
     "workflow_runtime_events",

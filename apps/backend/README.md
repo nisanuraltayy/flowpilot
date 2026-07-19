@@ -267,14 +267,17 @@ Bilinçli olarak yok:
 - **Supabase entegrasyonu, authentication, token doğrulama** — sonraki aşama
 - Login/register/password/session/e-posta doğrulama kodu
 - Team/department, permission/RBAC kataloğu
-- Purchase request, approval business modülü, task inbox kodu
-- Audit, notification, MinIO bucket / object storage SDK kodu
+- Approval decision endpoint'i, task inbox/list, audit timeline
+- Notification delivery, MinIO bucket / object storage SDK kodu
 - Dockerfile, backend container image
-- Health dışında API endpoint'i (workflow runtime application servisi içeriden çağrılır; public runtime API'si YOK)
+- Public workflow runtime API'si (runtime application servisi yalnız içeriden çağrılır)
 
 **Var olan domain kodu:** `identity` (minimal User), `organization`
-(Organization/Membership + CreateOrganization) ve **`workflow_runtime` (Epic E09 —
-production runtime core: definition versioning, instance/task/event lifecycle,
+(Organization/Membership + CreateOrganization + MembershipQuery), **`workflow_runtime`
+(Epic E09 — production runtime core: definition versioning, instance/task/event lifecycle,
 transactional outbox + idempotent inbox, persisted timer, RLS; `WorkflowRuntimePort`
-arkasında)**. Worker artık `--check`'e ek olarak `--run-once` / `--run` dispatch
-modlarını destekler. Diğer 10 bounded context paketi hâlâ boştur.
+arkasında)** ve **`purchase_request` (ilk dikey dilim — Create Purchase Request → workflow
+başlatma; `POST`/`GET /v1/organizations/{id}/purchase-requests`; migration `0004`)**. PR
+oluşturma, workflow instance başlangıcıyla cross-module ATOMİK (compose UnitOfWork,
+`api/wiring.py`). Worker `--check` + `--run-once` / `--run` dispatch modlarını destekler.
+Diğer 9 bounded context paketi hâlâ boştur. Approval karar/inbox/timeline sonraki aşamada.

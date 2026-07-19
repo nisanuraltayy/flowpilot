@@ -24,6 +24,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from flowpilot.api.wiring import SqlAlchemyPurchaseRequestUnitOfWork
 from flowpilot.config.settings import Settings
 from flowpilot.modules.identity.application.auth import (
     AuthProviderPort,
@@ -42,8 +43,22 @@ from flowpilot.modules.identity.infrastructure.persistence.user_directory import
 )
 from flowpilot.modules.identity.infrastructure.supabase_jwt import SupabaseJwtAuthAdapter
 from flowpilot.modules.organization.application.handler import CreateOrganizationHandler
+from flowpilot.modules.organization.infrastructure.persistence.membership_query import (
+    SqlAlchemyMembershipQuery,
+)
 from flowpilot.modules.organization.infrastructure.persistence.unit_of_work import (
     SqlAlchemyUnitOfWork,
+)
+from flowpilot.modules.purchase_request.application.create_handler import (
+    CreatePurchaseRequestHandler,
+)
+from flowpilot.modules.purchase_request.application.get_handler import GetPurchaseRequestHandler
+from flowpilot.modules.purchase_request.infrastructure.persistence.read_query import (
+    SqlAlchemyPurchaseRequestReadQuery,
+)
+from flowpilot.modules.workflow_runtime.application.service import WorkflowRuntimeService
+from flowpilot.modules.workflow_runtime.infrastructure.persistence.unit_of_work import (
+    SqlAlchemyWorkflowUnitOfWork,
 )
 from flowpilot.shared.clock import SystemClock
 from flowpilot.shared.ids import UuidGenerator
@@ -142,6 +157,43 @@ def get_create_organization_handler(
         user_directory=SqlAlchemyUserDirectory(session_factory),
         clock=SystemClock(),
         id_generator=UuidGenerator(),
+    )
+
+
+def _build_runtime_service(session_factory: sessionmaker[Session]) -> WorkflowRuntimeService:
+    return WorkflowRuntimeService(
+        unit_of_work_factory=lambda: SqlAlchemyWorkflowUnitOfWork(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_membership_query(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> SqlAlchemyMembershipQuery:
+    return SqlAlchemyMembershipQuery(session_factory)
+
+
+def get_create_purchase_request_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> CreatePurchaseRequestHandler:
+    runtime = _build_runtime_service(session_factory)
+    return CreatePurchaseRequestHandler(
+        unit_of_work_factory=lambda: SqlAlchemyPurchaseRequestUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        provisioning=runtime,
+        runtime=runtime,
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_get_purchase_request_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> GetPurchaseRequestHandler:
+    return GetPurchaseRequestHandler(
+        read_query=SqlAlchemyPurchaseRequestReadQuery(session_factory),
+        runtime=_build_runtime_service(session_factory),
     )
 
 
