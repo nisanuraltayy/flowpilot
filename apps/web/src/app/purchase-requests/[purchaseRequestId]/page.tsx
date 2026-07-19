@@ -1,16 +1,14 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { MoneyDisplay } from "@/components/money-display";
+import { RoleBadge } from "@/components/role-badge";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { StatusBadge } from "@/components/status-badge";
 import { Timeline } from "@/components/timeline";
-import {
-  getUserEmail,
-  requireActiveOrganization,
-} from "@/features/organizations/context";
-import { approvalRoleLabel } from "@/features/purchase-requests/display";
+import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
 import { formatDateTime } from "@/lib/datetime";
 import { getPurchaseRequest, getPurchaseRequestTimeline } from "@/lib/api/resources";
 
@@ -18,6 +16,24 @@ export const metadata: Metadata = { title: "Talep detayı" };
 
 interface PageProps {
   readonly params: Promise<{ readonly purchaseRequestId: string }>;
+}
+
+function ResultBanner({ status }: { readonly status: string }) {
+  if (status === "approved") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
+        <span aria-hidden="true">✓</span> Talep onaylandı; süreç tamamlandı.
+      </div>
+    );
+  }
+  if (status === "rejected") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+        <span aria-hidden="true">✕</span> Talep reddedildi; süreç sonlandı.
+      </div>
+    );
+  }
+  return null;
 }
 
 export default async function PurchaseRequestDetailPage({ params }: PageProps) {
@@ -42,7 +58,6 @@ export default async function PurchaseRequestDetailPage({ params }: PageProps) {
   }
 
   const detail = detailOutcome.data;
-  const role = approvalRoleLabel(detail.currentApprovalRole);
   const timeline = timelineOutcome.kind === "ok" ? timelineOutcome.data : [];
 
   return (
@@ -51,43 +66,70 @@ export default async function PurchaseRequestDetailPage({ params }: PageProps) {
       organizationName={context.organization.name}
       activeNav="requests"
     >
-      <div className="mx-auto max-w-2xl">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">{detail.title}</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Oluşturuldu: <time dateTime={detail.createdAt}>{formatDateTime(detail.createdAt)}</time>
-            </p>
-          </div>
-          <StatusBadge status={detail.status} />
-        </div>
+      <div className="mx-auto max-w-3xl">
+        <Link
+          href="/purchase-requests"
+          className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+        >
+          ← Taleplerim
+        </Link>
 
-        <dl className="mt-6 grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-white p-5 sm:grid-cols-2">
-          <div>
-            <dt className="text-xs font-medium text-slate-500">Tutar</dt>
-            <dd className="mt-0.5 text-sm font-semibold text-slate-900">
-              <MoneyDisplay amountMinor={detail.amountMinor} />
-            </dd>
+        {/* Özet */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+              {detail.title}
+            </h1>
+            <StatusBadge status={detail.status} />
           </div>
-          <div>
-            <dt className="text-xs font-medium text-slate-500">Bekleyen onay adımı</dt>
-            <dd className="mt-0.5 text-sm text-slate-900">{role ?? "—"}</dd>
-          </div>
-          {detail.description ? (
-            <div className="sm:col-span-2">
-              <dt className="text-xs font-medium text-slate-500">Açıklama</dt>
-              <dd className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">
-                {detail.description}
+
+          <dl className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-medium text-slate-500">Tutar</dt>
+              <dd className="mt-0.5 text-lg font-semibold text-slate-900">
+                <MoneyDisplay amountMinor={detail.amountMinor} />
               </dd>
             </div>
-          ) : null}
-        </dl>
+            <div>
+              <dt className="text-xs font-medium text-slate-500">Bekleyen onay adımı</dt>
+              <dd className="mt-0.5 text-sm text-slate-900">
+                <RoleBadge role={detail.currentApprovalRole} />
+                {detail.currentApprovalRole === null ? (
+                  <span className="text-slate-400">—</span>
+                ) : null}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-slate-500">Oluşturuldu</dt>
+              <dd className="mt-0.5 text-sm text-slate-700">
+                <time dateTime={detail.createdAt}>{formatDateTime(detail.createdAt)}</time>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-slate-500">Güncellendi</dt>
+              <dd className="mt-0.5 text-sm text-slate-700">
+                <time dateTime={detail.updatedAt}>{formatDateTime(detail.updatedAt)}</time>
+              </dd>
+            </div>
+            {detail.description ? (
+              <div className="sm:col-span-2">
+                <dt className="text-xs font-medium text-slate-500">Açıklama</dt>
+                <dd className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">
+                  {detail.description}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
 
-        <section className="mt-8">
-          <h2 className="text-sm font-semibold text-slate-900">Süreç zaman çizelgesi</h2>
-          <div className="mt-3">
-            <Timeline items={timeline} />
+          <div className="mt-5">
+            <ResultBanner status={detail.status} />
           </div>
+        </div>
+
+        {/* Süreç */}
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900">Süreç zaman çizelgesi</h2>
+          <Timeline items={timeline} />
         </section>
       </div>
     </AppShell>

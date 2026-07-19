@@ -2,12 +2,11 @@ import type { Metadata } from "next";
 
 import { Alert } from "@/components/alert";
 import { AppShell } from "@/components/app-shell";
+import { ButtonLink } from "@/components/button";
 import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import {
-  getUserEmail,
-  requireActiveOrganization,
-} from "@/features/organizations/context";
+import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
 import { TaskInboxList } from "@/features/tasks/task-inbox-list";
 import { getMyTaskInbox } from "@/lib/api/resources";
 
@@ -20,24 +19,31 @@ export default async function TaskInboxPage() {
   }
   const userEmail = await getUserEmail();
   const outcome = await getMyTaskInbox(context.accessToken, context.organization.organizationId);
+  const count = outcome.kind === "ok" ? outcome.data.length : 0;
 
   return (
     <AppShell userEmail={userEmail} organizationName={context.organization.name} activeNav="inbox">
-      <h1 className="text-2xl font-semibold text-slate-900">Onay Kutusu</h1>
-      <p className="mt-1 text-sm text-slate-600">Sana atanmış, karar bekleyen onay görevleri.</p>
+      <PageHeader
+        title="Onay Kutusu"
+        description={
+          count > 0
+            ? `${count} görev kararını bekliyor.`
+            : "Sana atanmış, karar bekleyen onay görevleri burada görünür."
+        }
+      />
 
-      <div className="mt-6">
-        {outcome.kind !== "ok" ? (
-          <Alert tone="error">Görevler şu anda getirilemedi. Lütfen sayfayı yenileyin.</Alert>
-        ) : outcome.data.length === 0 ? (
-          <EmptyState
-            title="Bekleyen onay görevin yok"
-            description="Sana bir onay görevi atandığında burada görünecek."
-          />
-        ) : (
-          <TaskInboxList items={outcome.data} />
-        )}
-      </div>
+      {outcome.kind !== "ok" ? (
+        <Alert tone="error">Görevler şu anda getirilemedi. Lütfen sayfayı yenileyin.</Alert>
+      ) : outcome.data.length === 0 ? (
+        <EmptyState
+          icon="✅"
+          title="Bekleyen onay görevin yok"
+          description="Sana bir onay görevi atandığında burada görünecek ve buradan onaylayıp reddedebileceksin."
+          action={<ButtonLink href="/purchase-requests">Taleplerime git</ButtonLink>}
+        />
+      ) : (
+        <TaskInboxList items={outcome.data} />
+      )}
     </AppShell>
   );
 }

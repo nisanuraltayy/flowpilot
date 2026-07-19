@@ -51,7 +51,7 @@ export function LoginForm({ action }: LoginFormProps) {
         Hesabın yok mu?{" "}
         <Link
           href="/signup"
-          className="font-medium text-blue-600 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="font-medium text-brand-600 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
         >
           Kayıt ol
         </Link>

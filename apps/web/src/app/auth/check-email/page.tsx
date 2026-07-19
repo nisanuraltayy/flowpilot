@@ -24,7 +24,7 @@ export default function CheckEmailPage() {
         </p>
         <Link
           href="/login"
-          className="text-center text-sm font-medium text-blue-600 hover:text-blue-700"
+          className="text-center text-sm font-medium text-brand-600 hover:text-brand-700"
         >
           Giriş sayfasına dön
         </Link>

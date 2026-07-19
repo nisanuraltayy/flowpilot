@@ -51,14 +51,14 @@ export function SelectOrganizationForm({ organizations, action }: SelectOrganiza
         {organizations.map((organization, index) => (
           <label
             key={organization.organizationId}
-            className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-blue-300 has-[:checked]:border-blue-500 has-[:checked]:ring-2 has-[:checked]:ring-blue-100"
+            className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-brand-300 has-[:checked]:border-brand-500 has-[:checked]:ring-2 has-[:checked]:ring-brand-100"
           >
             <input
               type="radio"
               name="organizationId"
               value={organization.organizationId}
               defaultChecked={index === 0}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 text-brand-600 focus:ring-brand-500"
             />
             <span className="flex flex-col">
               <span className="text-sm font-medium text-slate-900">{organization.name}</span>
