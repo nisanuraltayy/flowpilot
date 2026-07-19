@@ -111,3 +111,23 @@ class PurchaseRequest:
             updated_at=now,
             version=self.version + 1,
         )
+
+    def approve(self, *, now: datetime) -> PurchaseRequest:
+        """IN_APPROVAL → APPROVED (son onay; approval kararıyla aynı transaction)."""
+        if self.status is not PurchaseRequestStatus.IN_APPROVAL:
+            raise InvalidPurchaseRequestTransitionError(
+                f"yalnız IN_APPROVAL talep approved olabilir (mevcut: {self.status.value})"
+            )
+        return replace(
+            self, status=PurchaseRequestStatus.APPROVED, updated_at=now, version=self.version + 1
+        )
+
+    def reject(self, *, now: datetime) -> PurchaseRequest:
+        """IN_APPROVAL → REJECTED."""
+        if self.status is not PurchaseRequestStatus.IN_APPROVAL:
+            raise InvalidPurchaseRequestTransitionError(
+                f"yalnız IN_APPROVAL talep rejected olabilir (mevcut: {self.status.value})"
+            )
+        return replace(
+            self, status=PurchaseRequestStatus.REJECTED, updated_at=now, version=self.version + 1
+        )

@@ -16,6 +16,12 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from flowpilot.config.settings import get_settings
+from flowpilot.modules.approval.infrastructure.persistence.tables import (
+    metadata as approval_metadata,
+)
+from flowpilot.modules.audit.infrastructure.persistence.tables import (
+    metadata as audit_metadata,
+)
 from flowpilot.modules.identity.infrastructure.persistence.tables import (
     metadata as identity_metadata,
 )
@@ -40,6 +46,8 @@ target_metadata = [
     organization_metadata,
     workflow_runtime_metadata,
     purchase_request_metadata,
+    approval_metadata,
+    audit_metadata,
 ]
 
 

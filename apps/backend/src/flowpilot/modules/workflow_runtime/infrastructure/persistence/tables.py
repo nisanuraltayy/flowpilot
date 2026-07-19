@@ -99,6 +99,7 @@ tasks_table = Table(
     Column("node_id", String(200), nullable=False),
     Column("step_index", Integer, nullable=False),
     Column("approver_role", String(100), nullable=False),
+    Column("assigned_user_id", UUID(as_uuid=True), nullable=True),
     Column("status", String(32), nullable=False),
     Column("decided_by_user_id", UUID(as_uuid=True), nullable=True),
     Column("decision", String(32), nullable=True),

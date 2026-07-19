@@ -13,7 +13,10 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from flowpilot.modules.purchase_request.application.dto import PurchaseRequestDetail
+from flowpilot.modules.purchase_request.application.dto import (
+    PurchaseRequestDetail,
+    PurchaseRequestListItem,
+)
 from flowpilot.modules.purchase_request.infrastructure.persistence.tables import requests_table
 
 
@@ -55,3 +58,35 @@ class SqlAlchemyPurchaseRequestReadQuery:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    def list_for_requester(
+        self, *, tenant_id: UUID, requester_user_id: UUID, limit: int
+    ) -> list[PurchaseRequestListItem]:
+        with self._session_factory() as session, session.begin():
+            session.execute(
+                text("SELECT set_config('app.current_tenant_id', :v, true)"),
+                {"v": str(tenant_id)},
+            )
+            rows = (
+                session.execute(
+                    select(requests_table)
+                    .where(requests_table.c.requested_by_user_id == requester_user_id)
+                    .order_by(requests_table.c.created_at.desc(), requests_table.c.id.desc())
+                    .limit(limit)
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            PurchaseRequestListItem(
+                purchase_request_id=row["id"],
+                title=str(row["title"]),
+                amount_minor=int(row["amount_minor"]),
+                currency=str(row["currency"]),
+                status=str(row["status"]),
+                current_approval_role=None,
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]

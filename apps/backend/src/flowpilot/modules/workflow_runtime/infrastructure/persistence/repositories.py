@@ -279,6 +279,7 @@ class SqlAlchemyTaskRepository:
                 node_id=task.node_id,
                 step_index=task.step_index,
                 approver_role=task.approver_role,
+                assigned_user_id=task.assigned_user_id.value if task.assigned_user_id else None,
                 status=task.status.value,
                 version=task.version,
                 created_at=now,
@@ -300,6 +301,7 @@ class SqlAlchemyTaskRepository:
             decided_by=UserId(row["decided_by_user_id"]) if row["decided_by_user_id"] else None,
             decision=WorkflowTaskStatus(row["decision"]) if row["decision"] else None,
             idempotency_key=row["idempotency_key"],
+            assigned_user_id=(UserId(row["assigned_user_id"]) if row["assigned_user_id"] else None),
         )
 
     def get(self, task_id: UUID) -> WorkflowTask:

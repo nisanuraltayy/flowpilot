@@ -11,7 +11,12 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from flowpilot.modules.purchase_request.application.dto import PurchaseRequestDetail
+from flowpilot.modules.audit.application.ports import AuditWriterPort
+from flowpilot.modules.purchase_request.application.dto import (
+    InboxItem,
+    PurchaseRequestDetail,
+    PurchaseRequestListItem,
+)
 from flowpilot.modules.purchase_request.domain.purchase_request import PurchaseRequest
 from flowpilot.modules.workflow_runtime.application.port import WorkflowUnitOfWork
 
@@ -25,11 +30,20 @@ class PurchaseRequestRepository(Protocol):
         """Optimistic CAS: expected_version tutmazsa ConcurrencyConflictError."""
         ...
 
+    def get_by_workflow_instance(self, workflow_instance_id: UUID) -> PurchaseRequest | None:
+        """Bir workflow instance'a bağlı talebi döndürür (approval kararı akışı için)."""
+        ...
+
 
 class PurchaseRequestUnitOfWork(WorkflowUnitOfWork, Protocol):
-    """workflow_runtime UoW + purchase_requests repo — TEK session, TEK transaction."""
+    """workflow_runtime UoW + purchase_requests + audit — TEK session, TEK transaction.
+
+    `audit`, talep oluşturma akışının (created/started/task_assigned) denetim
+    kayıtlarını AYNI transaction'da yazması için compose edilir (timeline bütünlüğü).
+    """
 
     purchase_requests: PurchaseRequestRepository
+    audit: AuditWriterPort
 
     def __enter__(self) -> PurchaseRequestUnitOfWork: ...
 
@@ -40,3 +54,29 @@ class PurchaseRequestReadQuery(Protocol):
     def get(
         self, *, tenant_id: UUID, purchase_request_id: UUID, current_user_id: UUID
     ) -> PurchaseRequestDetail | None: ...
+
+    def list_for_requester(
+        self, *, tenant_id: UUID, requester_user_id: UUID, limit: int
+    ) -> list[PurchaseRequestListItem]:
+        """Yalnız actor'ın KENDİ oluşturduğu talepler, newest-first (MVP)."""
+        ...
+
+
+class TaskInboxQuery(Protocol):
+    """Actor'a atanmış AKTİF onay task'larının inbox'ı (cross-module read model)."""
+
+    def list_pending_for_user(
+        self, *, tenant_id: UUID, user_id: UUID, limit: int
+    ) -> list[InboxItem]: ...
+
+
+class RoleAssigneeResolver(Protocol):
+    """Workflow başlangıcında role→assignee eşlemesini SABİTLEMEK için (owner #4/#5).
+
+    Approval modülünün adapter'ı bunu STRÜKTÜREL olarak uygular (approval → PR
+    bağımlılığı yönünde; PR approval'ı IMPORT ETMEZ — circular import yok). Eksik
+    roller aktif owner'a idempotent atanır; sonra aktif eşleme döner. Public
+    role-management endpoint'i DEĞİLDİR.
+    """
+
+    def resolve_all(self, *, tenant_id: UUID, actor_user_id: UUID) -> dict[str, str]: ...

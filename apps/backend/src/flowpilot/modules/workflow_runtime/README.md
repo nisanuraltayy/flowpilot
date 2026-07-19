@@ -12,7 +12,24 @@ worker) üzerinde production kalitesinde uygulandı. Spike kodu
 tarihsel/teknik kanıttır; production bu dizini **import etmez**.
 
 - **LOCK-003 KAPANDI** (2026-07-19, ADR-004 Accepted). Runtime'a bağlı üretim kodu artık serbesttir.
-- **Henüz Purchase Request'e bağlı DEĞİLDİR** ve **public runtime API'si YOKTUR** — application servisi bir sonraki story'de (Purchase Request backend) içeriden çağrılacaktır.
+- **Purchase Request + Approval akışlarına bağlıdır.** Runtime `WorkflowRuntimeTransactionPort`
+  (tx-metodları) üzerinden compose transaction'a katılır; `WorkflowRuntimeProvisioningPort`
+  ile varsayılan definition idempotent provision edilir. Public HTTP runtime API'si yoktur —
+  yalnız purchase_request/approval application katmanları içeriden çağırır.
+
+### Task assignee pinning (owner #5) + karar akışı
+
+- `workflow_runtime_tasks.assigned_user_id` (migration `0005`): task **oluşturulduğu anda**
+  role'e atanmış kullanıcı SABİTLENİR. `SubmitFormCommand.role_assignees` (role_key → user_id)
+  ile geçirilir. Rol ataması sonradan değişse bile mevcut açık task'ın assignee'si DEĞİŞMEZ.
+- Yetki `assigned_user_id` iledir (owner #6): assignee sabitse yalnız o kullanıcı karar
+  verebilir (`UnauthorizedApproverError`); assignee None ise (legacy/test) rol eşleşmesine düşülür.
+- `decide_task_tx(...)` COMMIT ETMEZ; sağlanan compose UoW üzerinde çalışır — approval
+  kararının PR status + `ApprovalDecision` + audit ile TEK transaction'da birleşmesini sağlar.
+- **Terminal-task idempotency:** nihai adımın (instance'ı tamamlayan/reddeden) kararı **aynı
+  actor + aynı key** ile replay edilirse `TerminalInstanceError` değil güvenli idempotent
+  duplicate (duplicate=True) döner; farklı actor/key ise terminal instance → `TerminalInstanceError`
+  (SPK-09 korunur), canlı instance'ta terminal task → `DuplicateDecisionError`.
 
 ## Katmanlar
 

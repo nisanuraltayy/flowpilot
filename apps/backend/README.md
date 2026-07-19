@@ -267,7 +267,6 @@ Bilinçli olarak yok:
 - **Supabase entegrasyonu, authentication, token doğrulama** — sonraki aşama
 - Login/register/password/session/e-posta doğrulama kodu
 - Team/department, permission/RBAC kataloğu
-- Approval decision endpoint'i, task inbox/list, audit timeline
 - Notification delivery, MinIO bucket / object storage SDK kodu
 - Dockerfile, backend container image
 - Public workflow runtime API'si (runtime application servisi yalnız içeriden çağrılır)
@@ -275,9 +274,12 @@ Bilinçli olarak yok:
 **Var olan domain kodu:** `identity` (minimal User), `organization`
 (Organization/Membership + CreateOrganization + MembershipQuery), **`workflow_runtime`
 (Epic E09 — production runtime core: definition versioning, instance/task/event lifecycle,
-transactional outbox + idempotent inbox, persisted timer, RLS; `WorkflowRuntimePort`
-arkasında)** ve **`purchase_request` (ilk dikey dilim — Create Purchase Request → workflow
-başlatma; `POST`/`GET /v1/organizations/{id}/purchase-requests`; migration `0004`)**. PR
-oluşturma, workflow instance başlangıcıyla cross-module ATOMİK (compose UnitOfWork,
-`api/wiring.py`). Worker `--check` + `--run-once` / `--run` dispatch modlarını destekler.
-Diğer 9 bounded context paketi hâlâ boştur. Approval karar/inbox/timeline sonraki aşamada.
+transactional outbox + idempotent inbox, persisted timer, RLS, task assignee pinning;
+`WorkflowRuntimePort` arkasında)**, **`purchase_request` (Create → workflow → sıralı onay →
+timeline; `POST`/`GET`/`GET .../timeline` ve liste endpoint'leri)**, **`approval` (role
+assignment provisioning + atomik karar use-case + kişisel inbox; `POST /v1/organizations/
+{id}/tasks/{task_id}/decision`, `GET .../tasks/inbox`)** ve **`audit` (append-only writer +
+timeline read model)** — migration `0005`. Karar akışı, runtime task transition + PR status +
+ApprovalDecision + audit'i cross-module ATOMİK (compose UnitOfWork, `api/wiring.py`) commit
+eder. Worker `--check` + `--run-once` / `--run` dispatch modlarını destekler. Diğer 7 bounded
+context paketi hâlâ boştur. Purchase Request + inbox + timeline frontend'i sonraki aşamada.

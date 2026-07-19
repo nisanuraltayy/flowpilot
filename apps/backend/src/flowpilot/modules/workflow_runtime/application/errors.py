@@ -11,7 +11,11 @@ from __future__ import annotations
 from flowpilot.modules.workflow_runtime.domain.errors import (
     ConcurrencyConflictError,
     DefinitionValidationError,
+    DuplicateDecisionError,
+    InvalidTransitionError,
+    SequenceOrderError,
     TerminalInstanceError,
+    UnauthorizedApproverError,
     WorkflowInstanceNotFoundError,
     WorkflowRuntimeError,
     WorkflowTaskNotFoundError,
@@ -20,7 +24,11 @@ from flowpilot.modules.workflow_runtime.domain.errors import (
 __all__ = [
     "ConcurrencyConflictError",
     "DefinitionValidationError",
+    "DuplicateDecisionError",
+    "InvalidTransitionError",
+    "SequenceOrderError",
     "TerminalInstanceError",
+    "UnauthorizedApproverError",
     "WorkflowInstanceNotFoundError",
     "WorkflowRuntimeError",
     "WorkflowTaskNotFoundError",

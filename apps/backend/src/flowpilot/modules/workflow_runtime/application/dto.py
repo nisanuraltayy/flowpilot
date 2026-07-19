@@ -40,6 +40,9 @@ class SubmitFormCommand:
     expected_version: int
     form_data: dict[str, Any]
     request_id: str
+    # role_key → assigned user_id (str). Approval task'ları oluşturulurken assignee
+    # SABİTLENİR (owner #5). Boş bırakılırsa assignee None (assignee-öncesi testler).
+    role_assignees: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,7 @@ class TaskView:
     step_index: int
     approver_role: str
     status: str
+    assigned_user_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -111,6 +115,9 @@ class DecisionResult:
     duplicate: bool
     instance_status: str
     activated_task_id: UUID | None
+    required_role: str | None = None
+    next_approval_role: str | None = None
+    next_task_assigned_user_id: UUID | None = None
 
 
 @dataclass(frozen=True)

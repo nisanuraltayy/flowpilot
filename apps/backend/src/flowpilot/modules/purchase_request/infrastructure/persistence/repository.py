@@ -8,13 +8,24 @@ yapar; stale write kontrollü PurchaseRequestConcurrencyError üretir.
 from __future__ import annotations
 
 from typing import Any, cast
+from uuid import UUID
 
-from sqlalchemy import CursorResult, and_, insert, update
+from sqlalchemy import CursorResult, and_, insert, select, update
 from sqlalchemy.orm import Session
 
 from flowpilot.modules.purchase_request.domain.errors import PurchaseRequestConcurrencyError
-from flowpilot.modules.purchase_request.domain.purchase_request import PurchaseRequest
+from flowpilot.modules.purchase_request.domain.identifiers import PurchaseRequestId
+from flowpilot.modules.purchase_request.domain.money import Money
+from flowpilot.modules.purchase_request.domain.purchase_request import (
+    PurchaseRequest,
+    PurchaseRequestStatus,
+)
+from flowpilot.modules.purchase_request.domain.value_objects import (
+    PurchaseRequestDescription,
+    PurchaseRequestTitle,
+)
 from flowpilot.modules.purchase_request.infrastructure.persistence.tables import requests_table
+from flowpilot.shared.identifiers import TenantId, UserId
 
 
 class SqlAlchemyPurchaseRequestRepository:
@@ -66,3 +77,29 @@ class SqlAlchemyPurchaseRequestRepository:
             raise PurchaseRequestConcurrencyError(
                 "purchase request eşzamanlı değişti — 409 (sessiz overwrite yok)"
             )
+
+    def get_by_workflow_instance(self, workflow_instance_id: UUID) -> PurchaseRequest | None:
+        row = (
+            self._session.execute(
+                select(requests_table).where(
+                    requests_table.c.workflow_instance_id == workflow_instance_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            return None
+        return PurchaseRequest(
+            id=PurchaseRequestId(row["id"]),
+            tenant_id=TenantId(row["tenant_id"]),
+            requested_by=UserId(row["requested_by_user_id"]),
+            title=PurchaseRequestTitle(str(row["title"])),
+            description=PurchaseRequestDescription(row["description"]),
+            money=Money(amount_minor=int(row["amount_minor"]), currency=str(row["currency"])),
+            status=PurchaseRequestStatus(row["status"]),
+            workflow_instance_id=row["workflow_instance_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            version=int(row["version"]),
+        )

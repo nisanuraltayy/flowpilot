@@ -9,7 +9,10 @@ varlığını sızdırmayan kontrollü hata üretilir.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
+from uuid import UUID
 
+from flowpilot.modules.audit.application.dto import AuditEventType, AuditRecord
 from flowpilot.modules.organization.application.contracts import MembershipQuery
 from flowpilot.modules.purchase_request.application.dto import (
     CreatePurchaseRequestCommand,
@@ -20,7 +23,10 @@ from flowpilot.modules.purchase_request.application.errors import (
     MembershipNotActiveError,
     WorkflowConfigurationError,
 )
-from flowpilot.modules.purchase_request.application.ports import PurchaseRequestUnitOfWork
+from flowpilot.modules.purchase_request.application.ports import (
+    PurchaseRequestUnitOfWork,
+    RoleAssigneeResolver,
+)
 from flowpilot.modules.purchase_request.application.workflow import (
     WORKFLOW_KEY,
     load_default_definition,
@@ -36,6 +42,7 @@ from flowpilot.modules.workflow_runtime.application.dto import (
     PublishDefinitionCommand,
     StartInstanceCommand,
     SubmitFormCommand,
+    TaskView,
 )
 from flowpilot.modules.workflow_runtime.application.errors import WorkflowRuntimeError
 from flowpilot.modules.workflow_runtime.application.port import (
@@ -43,6 +50,7 @@ from flowpilot.modules.workflow_runtime.application.port import (
     WorkflowRuntimeTransactionPort,
 )
 from flowpilot.shared.clock import ClockPort
+from flowpilot.shared.errors import DomainError
 from flowpilot.shared.identifiers import TenantId, UserId
 from flowpilot.shared.ids import IdGeneratorPort
 
@@ -59,6 +67,7 @@ class CreatePurchaseRequestHandler:
         membership_query: MembershipQuery,
         provisioning: WorkflowRuntimeProvisioningPort,
         runtime: WorkflowRuntimeTransactionPort,
+        role_resolver: RoleAssigneeResolver,
         clock: ClockPort,
         id_generator: IdGeneratorPort,
     ) -> None:
@@ -66,6 +75,7 @@ class CreatePurchaseRequestHandler:
         self._memberships = membership_query
         self._provisioning = provisioning
         self._runtime = runtime
+        self._role_resolver = role_resolver
         self._clock = clock
         self._ids = id_generator
 
@@ -95,6 +105,15 @@ class CreatePurchaseRequestHandler:
             )
         except WorkflowRuntimeError as exc:
             raise WorkflowConfigurationError("varsayılan workflow provision edilemedi") from exc
+
+        # Approval rollerini owner'a idempotent ata + role→assignee eşlemesini çöz
+        # (owner #4/#5). Task'lar submit_form'da bu eşlemeyle SABİTLENİR.
+        try:
+            role_assignees = self._role_resolver.resolve_all(
+                tenant_id=command.tenant_id, actor_user_id=command.actor_user_id
+            )
+        except DomainError as exc:  # aktif owner yok vb. → kontrollü configuration error
+            raise WorkflowConfigurationError("onaycı atamaları çözülemedi") from exc
 
         now = self._clock.now()
         request, _created_event = PurchaseRequest.create(
@@ -138,6 +157,7 @@ class CreatePurchaseRequestHandler:
                         "currency": money.currency,
                     },
                     request_id=str(request.id.value),
+                    role_assignees=role_assignees,
                 ),
             )
             if submitted.active_task is None:
@@ -146,6 +166,18 @@ class CreatePurchaseRequestHandler:
 
             linked = request.attach_workflow(workflow_instance_id=started.instance_id, now=now)
             uow.purchase_requests.update_checked(linked, expected_version=request.version)
+
+            # Denetim timeline'ının başlangıcı: created → started → task_assigned
+            # (AYNI transaction; timeline bütünlüğü ve deterministik sıra için).
+            self._write_creation_audit(
+                uow,
+                command,
+                pr_id=request.id.value,
+                instance_id=started.instance_id,
+                task=submitted.active_task,
+                money=money,
+                now=now,
+            )
             uow.commit()
 
         return CreatePurchaseRequestResult(
@@ -158,4 +190,60 @@ class CreatePurchaseRequestHandler:
             currency=money.currency,
             current_approval_role=submitted.active_task.approver_role,
             created_at=now,
+        )
+
+    def _write_creation_audit(
+        self,
+        uow: PurchaseRequestUnitOfWork,
+        command: CreatePurchaseRequestCommand,
+        *,
+        pr_id: UUID,
+        instance_id: UUID,
+        task: TaskView,
+        money: Money,
+        now: datetime,
+    ) -> None:
+        def record(
+            event: AuditEventType,
+            *,
+            role: str | None,
+            task_id: UUID | None,
+            metadata: dict[str, str | int],
+        ) -> AuditRecord:
+            return AuditRecord(
+                event_id=self._ids.new_uuid(),
+                tenant_id=command.tenant_id,
+                aggregate_type="purchase_request",
+                aggregate_id=pr_id,
+                event_type=event,
+                occurred_at=now,
+                actor_user_id=command.actor_user_id,
+                role_key=role,
+                task_id=task_id,
+                metadata=metadata,
+            )
+
+        uow.audit.append(
+            record(
+                AuditEventType.PURCHASE_REQUEST_CREATED,
+                role=None,
+                task_id=None,
+                metadata={"amount_minor": money.amount_minor, "currency": money.currency},
+            )
+        )
+        uow.audit.append(
+            record(
+                AuditEventType.WORKFLOW_STARTED,
+                role=None,
+                task_id=None,
+                metadata={"workflow_instance_id": str(instance_id)},
+            )
+        )
+        uow.audit.append(
+            record(
+                AuditEventType.APPROVAL_TASK_ASSIGNED,
+                role=task.approver_role,
+                task_id=task.task_id,
+                metadata={},
+            )
         )

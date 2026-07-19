@@ -30,3 +30,7 @@ class MembershipQuery(Protocol):
     """
 
     def find_active(self, *, tenant_id: UUID, user_id: UUID) -> ActiveMembershipView | None: ...
+
+    def find_active_owner(self, *, tenant_id: UUID) -> ActiveMembershipView | None:
+        """Tenant'ın AKTİF owner üyeliği (default approver assignment için); yoksa None."""
+        ...

@@ -11,7 +11,21 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from flowpilot.api.wiring import SqlAlchemyPurchaseRequestUnitOfWork
+from flowpilot.api.wiring import (
+    SqlAlchemyApprovalDecisionUnitOfWork,
+    SqlAlchemyPurchaseRequestUnitOfWork,
+)
+from flowpilot.modules.approval.application.decide_handler import DecideApprovalTaskHandler
+from flowpilot.modules.approval.application.ensure_assignments import (
+    DefaultApproverResolver,
+    EnsureDefaultApprovalRoleAssignments,
+)
+from flowpilot.modules.approval.infrastructure.persistence.repositories import (
+    SqlAlchemyApprovalRoleAssignmentQuery,
+)
+from flowpilot.modules.approval.infrastructure.persistence.unit_of_work import (
+    SqlAlchemyApprovalAssignmentUnitOfWork,
+)
 from flowpilot.modules.organization.infrastructure.persistence.membership_query import (
     SqlAlchemyMembershipQuery,
 )
@@ -43,6 +57,19 @@ def build_runtime(app_sessionmaker: sessionmaker[Session]) -> WorkflowRuntimeSer
     )
 
 
+def build_role_resolver(app_sessionmaker: sessionmaker[Session]) -> DefaultApproverResolver:
+    ensure = EnsureDefaultApprovalRoleAssignments(
+        unit_of_work_factory=lambda: SqlAlchemyApprovalAssignmentUnitOfWork(app_sessionmaker),
+        membership_query=SqlAlchemyMembershipQuery(app_sessionmaker),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+    return DefaultApproverResolver(
+        ensure=ensure,
+        assignment_query=SqlAlchemyApprovalRoleAssignmentQuery(app_sessionmaker),
+    )
+
+
 def build_create_handler(
     app_sessionmaker: sessionmaker[Session],
 ) -> CreatePurchaseRequestHandler:
@@ -52,9 +79,35 @@ def build_create_handler(
         membership_query=SqlAlchemyMembershipQuery(app_sessionmaker),
         provisioning=runtime,
         runtime=runtime,
+        role_resolver=build_role_resolver(app_sessionmaker),
         clock=SystemClock(),
         id_generator=UuidGenerator(),
     )
+
+
+def build_decide_handler(app_sessionmaker: sessionmaker[Session]) -> DecideApprovalTaskHandler:
+    return DecideApprovalTaskHandler(
+        unit_of_work_factory=lambda: SqlAlchemyApprovalDecisionUnitOfWork(app_sessionmaker),
+        membership_query=SqlAlchemyMembershipQuery(app_sessionmaker),
+        runtime=build_runtime(app_sessionmaker),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def active_task_id(
+    app_sessionmaker: sessionmaker[Session], tenant: UUID, instance_id: UUID
+) -> UUID:
+    with app_sessionmaker() as s, s.begin():
+        s.execute(text("SELECT set_config('app.current_tenant_id', :v, true)"), {"v": str(tenant)})
+        row = s.execute(
+            text(
+                "SELECT id FROM workflow_runtime_tasks "
+                "WHERE instance_id = :i AND status = 'active' ORDER BY step_index LIMIT 1"
+            ),
+            {"i": str(instance_id)},
+        ).one()
+    return UUID(str(row[0]))
 
 
 def build_get_handler(app_sessionmaker: sessionmaker[Session]) -> GetPurchaseRequestHandler:

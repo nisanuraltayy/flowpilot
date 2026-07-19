@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from flowpilot.modules.audit.application.dto import AuditRecord
 from flowpilot.modules.organization.application.contracts import ActiveMembershipView
 from flowpilot.modules.purchase_request.application.create_handler import (
     CreatePurchaseRequestHandler,
@@ -121,10 +122,37 @@ class FakePurchaseRequestRepo:
     def update_checked(self, request: PurchaseRequest, *, expected_version: int) -> None:
         self.updated.append(request)
 
+    def get_by_workflow_instance(self, workflow_instance_id: UUID) -> PurchaseRequest | None:
+        return None
+
+
+class FakeAuditWriter:
+    def __init__(self) -> None:
+        self.records: list[AuditRecord] = []
+
+    def append(self, record: AuditRecord) -> None:
+        self.records.append(record)
+
+
+class FakeRoleResolver:
+    """`RoleAssigneeResolver` — ÜÇ rolü sabit fake user'lara eşler (owner #4/#5)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[UUID, UUID]] = []
+
+    def resolve_all(self, *, tenant_id: UUID, actor_user_id: UUID) -> dict[str, str]:
+        self.calls.append((tenant_id, actor_user_id))
+        return {
+            "team_manager": str(uuid4()),
+            "finance": str(uuid4()),
+            "general_manager": str(uuid4()),
+        }
+
 
 class FakeComposedUoW:
     def __init__(self, repo: FakePurchaseRequestRepo) -> None:
         self.purchase_requests = repo
+        self.audit = FakeAuditWriter()
         self.committed = False
         self.rolled_back = False
         self.tenant_context: UUID | None = None
@@ -172,16 +200,18 @@ def _handler(
     membership: FakeMembershipQuery,
     provisioning: FakeProvisioning,
     runtime: FakeRuntimeTx,
+    role_resolver: FakeRoleResolver | None = None,
 ) -> CreatePurchaseRequestHandler:
     return CreatePurchaseRequestHandler(
         unit_of_work_factory=lambda: uow,  # type: ignore[arg-type]
         membership_query=membership,
         provisioning=provisioning,
         runtime=runtime,  # type: ignore[arg-type]
+        role_resolver=role_resolver or FakeRoleResolver(),
         clock=FakeClock(
             __import__("datetime").datetime(2026, 7, 19, tzinfo=__import__("datetime").UTC)
         ),
-        id_generator=FakeIdGenerator([uuid4() for _ in range(10)]),
+        id_generator=FakeIdGenerator([uuid4() for _ in range(20)]),
     )
 
 
@@ -211,6 +241,18 @@ def test_happy_path_commits_and_calls_runtime() -> None:
     # PR insert + workflow bağlama update.
     assert len(repo.added) == 1
     assert len(repo.updated) == 1
+    # Task assignee'leri submit_form'a role→user eşlemesiyle geçirildi (owner #5).
+    assert runtime.submit_commands[0].role_assignees.keys() == {
+        "team_manager",
+        "finance",
+        "general_manager",
+    }
+    # Timeline başlangıcı AYNI transaction'da yazıldı: created → started → task_assigned.
+    assert [r.event_type.value for r in uow.audit.records] == [
+        "purchase_request.created",
+        "workflow.started",
+        "approval.task_assigned",
+    ]
 
 
 def test_inactive_membership_rejected_before_any_write() -> None:

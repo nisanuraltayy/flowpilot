@@ -226,6 +226,35 @@ Format:
     workflow_runtime'ın WorkflowUnitOfWork'ünü GENİŞLETİR; provider-neutral sınır korunur.
     Bkz. [[ASM-0013]] (runtime boundary konsolidasyonu).
 
+- id: ASM-0016
+  statement: >
+    MVP onaycı modeli (owner-approved). (a) Tenant başına üç approval role key
+    (team_manager, finance, general_manager); her role için tek aktif assignee; aynı
+    kullanıcı birden fazla rol taşıyabilir. (b) Organizasyonun rolleri henüz oluşmamışsa,
+    ilk onay akışından önce üç rol de AKTİF OWNER'a idempotent atanır (public
+    role-management endpoint DEĞİL; tekrar çalıştırmada duplicate üretmez, açık atamaları
+    overwrite etmez; aktif owner yoksa kontrollü configuration error). (c) Task
+    oluşturulduğunda assignee task'a SABİTLENİR; sonraki rol değişikliği açık task'ları
+    etkilemez. (d) Karar yetkisi YALNIZ task'ın assigned_user_id'sine eşit kullanıcıdadır.
+    (e) SELF-APPROVAL SERBEST: requester kendi adımını onaylayabilir.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner kararı: tek kullanıcının tüm workflow'u uçtan uca test edebilmesi için MVP'de
+    self-approval'a izin verilir. Bu GEÇİCİ bir ÜRÜN kararıdır, güvenlik açığı DEĞİLDİR;
+    separation-of-duties pilot öncesine ertelenmiştir.
+  expires_at: 2026-12-01
+  affected_stories: [FP-E10-001, FP-E10-002, FP-E10-003]
+  binding_rule: >
+    Self-approval izni gizli feature flag veya hard-code kullanıcı istisnası olarak
+    IMPLEMENTE EDİLMEZ — yetki yalnızca assigned_user_id'ye dayanır; requester==approver
+    için ÖZEL BİR BLOK YOKTUR. Separation-of-duties pilot-ready sürümde yeniden
+    değerlendirilir. Duplicate/eşzamanlı karar koruması (approval_decisions unique +
+    version CAS) bu izinden bağımsız olarak her zaman geçerlidir.
+  reference: apps/backend/src/flowpilot/modules/approval/README.md
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde

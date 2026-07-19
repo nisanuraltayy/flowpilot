@@ -24,8 +24,26 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from flowpilot.api.wiring import SqlAlchemyPurchaseRequestUnitOfWork
+from flowpilot.api.wiring import (
+    SqlAlchemyApprovalDecisionUnitOfWork,
+    SqlAlchemyPurchaseRequestUnitOfWork,
+    SqlAlchemyTaskInboxReadModel,
+)
 from flowpilot.config.settings import Settings
+from flowpilot.modules.approval.application.decide_handler import DecideApprovalTaskHandler
+from flowpilot.modules.approval.application.ensure_assignments import (
+    DefaultApproverResolver,
+    EnsureDefaultApprovalRoleAssignments,
+)
+from flowpilot.modules.approval.infrastructure.persistence.repositories import (
+    SqlAlchemyApprovalRoleAssignmentQuery,
+)
+from flowpilot.modules.approval.infrastructure.persistence.unit_of_work import (
+    SqlAlchemyApprovalAssignmentUnitOfWork,
+)
+from flowpilot.modules.audit.infrastructure.persistence.timeline_query import (
+    SqlAlchemyAuditTimelineQuery,
+)
 from flowpilot.modules.identity.application.auth import (
     AuthProviderPort,
     AuthProviderUnavailable,
@@ -174,6 +192,24 @@ def get_membership_query(
     return SqlAlchemyMembershipQuery(session_factory)
 
 
+def _build_role_resolver(session_factory: sessionmaker[Session]) -> DefaultApproverResolver:
+    """Approval rollerini owner'a idempotent atayan + aktif eşlemeyi çözen resolver.
+
+    Cross-module compose burada (composition root) kurulur: approval provisioning UoW
+    + organization membership contract + approval assignment query.
+    """
+    ensure = EnsureDefaultApprovalRoleAssignments(
+        unit_of_work_factory=lambda: SqlAlchemyApprovalAssignmentUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+    return DefaultApproverResolver(
+        ensure=ensure,
+        assignment_query=SqlAlchemyApprovalRoleAssignmentQuery(session_factory),
+    )
+
+
 def get_create_purchase_request_handler(
     session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
 ) -> CreatePurchaseRequestHandler:
@@ -183,6 +219,7 @@ def get_create_purchase_request_handler(
         membership_query=SqlAlchemyMembershipQuery(session_factory),
         provisioning=runtime,
         runtime=runtime,
+        role_resolver=_build_role_resolver(session_factory),
         clock=SystemClock(),
         id_generator=UuidGenerator(),
     )
@@ -195,6 +232,37 @@ def get_get_purchase_request_handler(
         read_query=SqlAlchemyPurchaseRequestReadQuery(session_factory),
         runtime=_build_runtime_service(session_factory),
     )
+
+
+def get_decide_approval_task_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> DecideApprovalTaskHandler:
+    """Onay kararı atomik use-case'i — runtime tx-port + compose UoW (tek transaction)."""
+    return DecideApprovalTaskHandler(
+        unit_of_work_factory=lambda: SqlAlchemyApprovalDecisionUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        runtime=_build_runtime_service(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_task_inbox_query(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> SqlAlchemyTaskInboxReadModel:
+    return SqlAlchemyTaskInboxReadModel(session_factory)
+
+
+def get_purchase_request_read_query(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> SqlAlchemyPurchaseRequestReadQuery:
+    return SqlAlchemyPurchaseRequestReadQuery(session_factory)
+
+
+def get_audit_timeline_query(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> SqlAlchemyAuditTimelineQuery:
+    return SqlAlchemyAuditTimelineQuery(session_factory)
 
 
 def get_current_actor(

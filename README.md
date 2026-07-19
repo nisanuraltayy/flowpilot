@@ -48,19 +48,22 @@ için kullanılır (service role key ve Supabase SDK'sı yok); browser'dan hiçb
 business tablosuna erişilmez — veri yalnız FastAPI üzerinden yönetilir.
 
 Tenant izolasyonu PostgreSQL RLS (ENABLE + FORCE) ile gerçek veritabanı
-testlerinde kanıtlanmıştır. Alembic history: `0001` + `0002`. Roller:
+testlerinde kanıtlanmıştır. Alembic history: `0001`–`0005`. Roller:
 `flowpilot_app`/`flowpilot_migrator` (ikisi de BYPASSRLS'siz).
 
-Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, approval karar endpoint'i,
-task inbox, audit timeline, notification delivery, `Dockerfile`, root npm workspace.
+Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, notification delivery,
+`Dockerfile`, Purchase Request / inbox / timeline frontend ekranları.
 
 Backend domain kodu `identity`, `organization`, **`workflow_runtime` (Epic E09 —
 production runtime core: definition versioning + immutable version, instance/task/event
-lifecycle, transactional outbox + idempotent inbox, persisted timer, RLS; migration
-`0003`; `WorkflowRuntimePort` arkasında)** ve **`purchase_request` (ilk dikey dilim —
-`POST`/`GET /v1/organizations/{id}/purchase-requests`; create → workflow başlatma cross-module
-ATOMİK; migration `0004`)** modüllerindedir; diğer 9 bounded context paketi boştur. Approval
-kararı/inbox/timeline ve public runtime API'si yoktur. **Canlı Supabase kabul testi 2026-07-15'te geçti:**
+lifecycle, transactional outbox + idempotent inbox, persisted timer, RLS, task assignee
+pinning; `WorkflowRuntimePort` arkasında)**, **`purchase_request` (Create → workflow →
+sıralı onay → timeline; `POST`/`GET`/liste/timeline endpoint'leri)**, **`approval` (role
+assignment + atomik karar use-case + kişisel inbox; decision/inbox endpoint'leri)** ve
+**`audit` (append-only writer + timeline read model)** modüllerindedir — migration `0005`.
+Karar akışı runtime + PR status + ApprovalDecision + audit'i cross-module ATOMİK commit eder;
+diğer 7 bounded context paketi boştur. Public runtime API'si yoktur. **Canlı Supabase kabul
+testi 2026-07-15'te geçti:**
 gerçek signup → e-posta doğrulama → login → ES256 token → `POST /v1/organizations`
 → 201; tenant + aktif owner membership aynı transaction'da oluştu. Ayrıntı:
 [docs/open-questions.md](docs/open-questions.md) (OQ-009/OQ-010 — kapandı).

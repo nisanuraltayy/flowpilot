@@ -52,3 +52,37 @@ class SqlAlchemyMembershipQuery:
             user_id=row["user_id"],
             role=str(row["role"]),
         )
+
+    def find_active_owner(self, *, tenant_id: UUID) -> ActiveMembershipView | None:
+        with self._session_factory() as session, session.begin():
+            session.execute(
+                text("SELECT set_config('app.current_tenant_id', :v, true)"),
+                {"v": str(tenant_id)},
+            )
+            row = (
+                session.execute(
+                    select(
+                        memberships_table.c.id,
+                        memberships_table.c.tenant_id,
+                        memberships_table.c.user_id,
+                        memberships_table.c.role,
+                    )
+                    .where(
+                        (memberships_table.c.tenant_id == tenant_id)
+                        & (memberships_table.c.role == "owner")
+                        & (memberships_table.c.status == "active")
+                    )
+                    .order_by(memberships_table.c.created_at)
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return ActiveMembershipView(
+            membership_id=row["id"],
+            tenant_id=row["tenant_id"],
+            user_id=row["user_id"],
+            role=str(row["role"]),
+        )

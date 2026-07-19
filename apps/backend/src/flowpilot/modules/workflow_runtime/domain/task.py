@@ -41,6 +41,10 @@ class WorkflowTask:
     decided_by: UserId | None = None
     decision: WorkflowTaskStatus | None = None
     idempotency_key: str | None = None
+    # Task oluşturulduğu anda role'e atanmış kullanıcı SABİTLENİR (owner kararı #5);
+    # rol ataması sonradan değişse bile bu task'ın assignee'si DEĞİŞMEZ. None ise
+    # (assignee-öncesi runtime testleri) yetki role üzerinden değerlendirilir.
+    assigned_user_id: UserId | None = None
 
     def activate(self) -> WorkflowTask:
         """pending → active (önceki adım tamamlanınca)."""
@@ -81,7 +85,15 @@ class WorkflowTask:
             raise DuplicateDecisionError(
                 f"adım {self.step_index} için zaten terminal karar var (tek geçerli karar)"
             )
-        if self.approver_role != approver_role:
+        # Yetki: assignee sabitlenmişse YALNIZ o kullanıcı karar verebilir (owner #6).
+        # Assignee yoksa (legacy/test) rol eşleşmesine düşülür.
+        if self.assigned_user_id is not None:
+            if actor != self.assigned_user_id:
+                raise UnauthorizedApproverError(
+                    f"adım {self.step_index} yalnız atanmış kullanıcısı tarafından "
+                    f"karar verilebilir"
+                )
+        elif self.approver_role != approver_role:
             raise UnauthorizedApproverError(
                 f"adım {self.step_index} rolü {self.approver_role!r}; "
                 f"{approver_role!r} karar veremez"

@@ -119,6 +119,9 @@ def tenant_b() -> UUID:
 
 
 _TRUNCATE_TABLES = (
+    "audit_entries",
+    "approval_decisions",
+    "approval_role_assignments",
     "purchase_request_requests",
     "workflow_runtime_inbox",
     "workflow_runtime_timers",

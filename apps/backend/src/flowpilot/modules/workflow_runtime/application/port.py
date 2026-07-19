@@ -239,3 +239,15 @@ class WorkflowRuntimeTransactionPort(Protocol):
     def submit_form_tx(
         self, uow: WorkflowUnitOfWork, command: SubmitFormCommand
     ) -> InstanceView: ...
+
+    def decide_task_tx(
+        self,
+        uow: WorkflowUnitOfWork,
+        *,
+        tenant_id: UUID,
+        actor_user_id: UUID,
+        task_id: UUID,
+        decision: str,
+        idempotency_key: str,
+        approver_role: str | None = None,
+    ) -> DecisionResult: ...

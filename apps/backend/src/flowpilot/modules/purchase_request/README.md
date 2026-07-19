@@ -5,19 +5,21 @@
 
 ## Durum
 
-✅ **İlk dikey dilim yazıldı** (Create Purchase Request → workflow başlatma). Approval
-karar endpoint'i, görev inbox'ı, audit timeline ve frontend **BU aşamada YOK** — sonraki
-aşamaya aittir.
+✅ **Dikey dilim + onay akışı yazıldı** (Create → workflow → sıralı onay → PR status →
+timeline). Kalan: frontend ekranları (sonraki aşama).
 
 > Not: Bu context PRD §35.1'in bounded context tablosunda ayrıca listelenmemiştir; ilk dikey dilim satın alma talebi olduğu için ayrı modül olarak konumlandırılmıştır ([ASM-0004](../../../../../../docs/assumptions.md)).
 
 ## Katmanlar
 
 ```text
-domain/          # identifiers, errors, money, value_objects, purchase_request (aggregate + event)
+domain/          # identifiers, errors, money, value_objects, purchase_request
+                 #   (aggregate + create/attach/approve/reject transitions + event)
 application/     # dto, errors, workflow (default definition loader), ports,
-                 #   create_handler (atomik use-case), get_handler; resources/ (versioned JSON)
-infrastructure/  # persistence: tables, repository, read_query
+                 #   create_handler (atomik use-case), get_handler, approval_link
+                 #   (onay akışı için yazma sözleşmesi); resources/ (versioned JSON)
+infrastructure/  # persistence: tables, repository (get_by_workflow_instance), read_query
+                 #   (get + list_for_requester)
 ```
 
 ## Domain modeli ve para
@@ -42,12 +44,21 @@ team_manager + finance · >50.000 TL → team_manager + finance + general_manage
 ## Cross-module ATOMİK transaction
 
 `CreatePurchaseRequest`, Purchase Request kaydını **ve** workflow instance başlangıcını
-(instance + ilk approval task + event + outbox) **AYNI transaction'da** commit eder. Bu,
+(instance + ilk approval task + event + outbox) **ve denetim kayıtlarını** (`purchase_request.created`
+→ `workflow.started` → `approval.task_assigned`) **AYNI transaction'da** commit eder. Bu,
 composition root'ta ([api/wiring.py](../../api/wiring.py)) kurulan **compose UnitOfWork**
-ile sağlanır: iki modülün adapter'ları TEK SQLAlchemy session'ı üzerinde birleşir. Runtime
-tarafı, kod kopyalanmadan `WorkflowRuntimeTransactionPort` (`start_instance_tx`/`submit_form_tx`
-— commit etmez, sağlanan uow üzerinde çalışır) ile katılır. Cross-module infrastructure importu
-YOKTUR; iki bağımsız commit YOKTUR; port'un provider-neutral sınırı korunur. Bkz. [ASM-0015](../../../../../../docs/assumptions.md).
+ile sağlanır: modüllerin adapter'ları (runtime + purchase_requests + audit) TEK SQLAlchemy
+session'ı üzerinde birleşir. Runtime tarafı, kod kopyalanmadan `WorkflowRuntimeTransactionPort`
+(`start_instance_tx`/`submit_form_tx` — commit etmez, sağlanan uow üzerinde çalışır) ile;
+audit tarafı `AuditWriterPort` ile katılır. Cross-module infrastructure importu YOKTUR; iki
+bağımsız commit YOKTUR; port'ların provider-neutral sınırı korunur. Bkz. [ASM-0015](../../../../../../docs/assumptions.md).
+
+### Onay akışının PR'a yansıması (approval_link)
+
+Approval modülü, `purchase_request.domain`'i import ETMEDEN — cross-context domain importu
+YASAK (dependency-rules §2) — bir kararın PR'a yansımasını `application/approval_link.py`
+üzerinden uygular: `apply_workflow_outcome` (workflow `completed`→approve, `rejected`→reject;
+IN_APPROVAL→APPROVED/REJECTED geçişi PR domain'inde kalır) ve `resolve_purchase_request_id`.
 
 ## Authorization
 
@@ -59,9 +70,13 @@ Path'teki `organization_id` tek başına yetki sağlamaz — membership ile doğ
 ## Endpoint'ler
 
 - **`POST /v1/organizations/{organization_id}/purchase-requests`** → 201; talep oluşturur, workflow başlatır, ilk approval task'ını üretir.
-- **`GET /v1/organizations/{organization_id}/purchase-requests/{id}`** → talep + workflow durumu + current approval role. Timeline/audit YOK.
+- **`GET /v1/organizations/{organization_id}/purchase-requests`** → actor'ın YALNIZ kendi talepleri, en yeni önce (server-side max page size; unbounded list YOK).
+- **`GET /v1/organizations/{organization_id}/purchase-requests/{id}`** → talep + workflow durumu + current approval role.
+- **`GET /v1/organizations/{organization_id}/purchase-requests/{id}/timeline`** → kronolojik, append-only audit timeline (tenant-scoped; hassas değer içermez).
 
-Public runtime API'si yoktur; runtime application servisi yalnız içeriden çağrılır.
+Onay kararı + kişisel inbox endpoint'leri `tasks` router'ındadır (approval modülü); bkz.
+[modules/approval](../approval/README.md). Public runtime API'si yoktur; runtime application
+servisi yalnız içeriden çağrılır.
 
 ## RLS
 

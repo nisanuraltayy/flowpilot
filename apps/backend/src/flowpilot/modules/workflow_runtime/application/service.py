@@ -41,6 +41,7 @@ from flowpilot.modules.workflow_runtime.domain.enums import (
 )
 from flowpilot.modules.workflow_runtime.domain.errors import (
     DefinitionValidationError,
+    DuplicateDecisionError,
     InvalidTransitionError,
 )
 from flowpilot.modules.workflow_runtime.domain.event import IntegrationEvent, WorkflowEvent
@@ -280,6 +281,8 @@ class WorkflowRuntimeService:
 
         active_task: WorkflowTask | None = None
         for index, role in enumerate(chain):
+            assignee_raw = command.role_assignees.get(role)
+            assignee = UserId(UUID(assignee_raw)) if assignee_raw else None
             task = WorkflowTask(
                 id=WorkflowTaskId(self._ids.new_uuid()),
                 tenant_id=tenant,
@@ -289,6 +292,7 @@ class WorkflowRuntimeService:
                 approver_role=role,
                 status=WorkflowTaskStatus.ACTIVE if index == 0 else WorkflowTaskStatus.PENDING,
                 version=1,
+                assigned_user_id=assignee,
             )
             uow.tasks.add(task, now=now)
             if index == 0:
@@ -327,96 +331,164 @@ class WorkflowRuntimeService:
     # ------------------------------------------------------------ decide task
 
     def decide_task(self, command: DecideTaskCommand) -> DecisionResult:
-        now = self._clock.now()
-        tenant = TenantId(command.tenant_id)
-        decision_status = _DECISION_TO_STATUS.get(command.decision)
-        if decision_status is None:
-            raise InvalidTransitionError(f"geçersiz karar: {command.decision!r}")
-
         with self._uow_factory() as uow:
             uow.set_actor_context(command.actor_user_id)
             uow.set_tenant_context(command.tenant_id)
-            task = uow.tasks.get(command.task_id)
-            instance = uow.instances.get(task.instance_id.value)
-            instance.guard_not_terminal()
-
-            decided = task.decide(
-                actor=UserId(command.actor_user_id),
-                approver_role=command.approver_role,
-                decision=decision_status,
+            result = self.decide_task_tx(
+                uow,
+                tenant_id=command.tenant_id,
+                actor_user_id=command.actor_user_id,
+                task_id=command.task_id,
+                decision=command.decision,
                 idempotency_key=command.idempotency_key,
+                approver_role=command.approver_role,
             )
-            if decided is task:  # idempotent replay — yeni yazım yok
+            if result.duplicate:
                 uow.rollback()
+            else:
+                uow.commit()
+        return result
+
+    def decide_task_tx(
+        self,
+        uow: WorkflowUnitOfWork,
+        *,
+        tenant_id: UUID,
+        actor_user_id: UUID,
+        task_id: UUID,
+        decision: str,
+        idempotency_key: str,
+        approver_role: str | None = None,
+    ) -> DecisionResult:
+        """Karar domain işi — SAĞLANAN uow üzerinde, COMMIT ETMEZ.
+
+        Yetki `assigned_user_id` iledir (owner #6): task assignee'si olmayan actor
+        UnauthorizedApproverError alır. `approver_role` None ise task'ın kendi rolü
+        kullanılır (self-consistent; auth assignee'ye bırakılır).
+        """
+        now = self._clock.now()
+        tenant = TenantId(tenant_id)
+        decision_status = _DECISION_TO_STATUS.get(decision)
+        if decision_status is None:
+            raise InvalidTransitionError(f"geçersiz karar: {decision!r}")
+
+        task = uow.tasks.get(task_id)
+        instance = uow.instances.get(task.instance_id.value)
+
+        # Terminal TASK için GERÇEK idempotent replay'i (aynı actor + aynı key) instance
+        # terminal guard'ından ÖNCE ele al: nihai adımın (instance'ı tamamlayan) kararı
+        # replay edildiğinde TerminalInstanceError değil, güvenli idempotent duplicate
+        # dönmeli. Replay DEĞİLSE (geç/farklı karar) SPK-09 semantiği korunur:
+        # instance terminal → TerminalInstanceError; instance canlı → DuplicateDecisionError.
+        if task.status.is_terminal:
+            is_replay = (
+                task.decided_by == UserId(actor_user_id)
+                and task.idempotency_key == idempotency_key
+                and task.decision is not None
+            )
+            if is_replay:
                 return DecisionResult(
                     task_id=task.id.value,
                     step_index=task.step_index,
                     instance_id=instance.id.value,
-                    decision=str(task.decision.value) if task.decision else command.decision,
+                    decision=str(task.decision.value) if task.decision else decision,
                     duplicate=True,
                     instance_status=instance.status.value,
                     activated_task_id=None,
+                    required_role=task.approver_role,
                 )
+            instance.guard_not_terminal()  # terminal instance → TerminalInstanceError (SPK-09)
+            raise DuplicateDecisionError(
+                f"adım {task.step_index} için zaten terminal karar var (tek geçerli karar)"
+            )
 
-            uow.tasks.update_checked(decided, expected_version=task.version, now=now)
+        instance.guard_not_terminal()
 
-            activated_task_id: UUID | None = None
-            instance_status = instance.status
-            if decision_status is WorkflowTaskStatus.APPROVED:
-                next_task = uow.tasks.find_by_step(instance.id.value, task.step_index + 1)
-                if next_task is not None:
-                    activated = next_task.activate()
-                    uow.tasks.update_checked(activated, expected_version=next_task.version, now=now)
-                    activated_task_id = activated.id.value
-                else:
-                    instance = self._finish_instance(uow, instance, tenant=tenant, now=now)
-                    instance_status = instance.status
+        decided = task.decide(
+            actor=UserId(actor_user_id),
+            approver_role=approver_role if approver_role is not None else task.approver_role,
+            decision=decision_status,
+            idempotency_key=idempotency_key,
+        )
+        if decided is task:  # idempotent replay (aktif task, aynı actor+key)
+            return DecisionResult(
+                task_id=task.id.value,
+                step_index=task.step_index,
+                instance_id=instance.id.value,
+                decision=str(task.decision.value) if task.decision else decision,
+                duplicate=True,
+                instance_status=instance.status.value,
+                activated_task_id=None,
+                required_role=task.approver_role,
+            )
+
+        uow.tasks.update_checked(decided, expected_version=task.version, now=now)
+
+        activated_task_id: UUID | None = None
+        next_role: str | None = None
+        next_assignee: UUID | None = None
+        instance_status = instance.status
+        if decision_status is WorkflowTaskStatus.APPROVED:
+            next_task = uow.tasks.find_by_step(instance.id.value, task.step_index + 1)
+            if next_task is not None:
+                activated = next_task.activate()
+                uow.tasks.update_checked(activated, expected_version=next_task.version, now=now)
+                activated_task_id = activated.id.value
+                next_role = activated.approver_role
+                next_assignee = (
+                    activated.assigned_user_id.value if activated.assigned_user_id else None
+                )
             else:
-                uow.tasks.cancel_open_for_instance(instance.id.value, now=now)
-                uow.timers.cancel_open_for_instance(instance.id.value)
-                instance = self._terminate_instance(
-                    uow, instance, WorkflowInstanceStatus.REJECTED, tenant=tenant, now=now
-                )
-                self._notify_requester(uow, instance, tenant=tenant, now=now)
+                instance = self._finish_instance(uow, instance, tenant=tenant, now=now)
                 instance_status = instance.status
+        else:
+            uow.tasks.cancel_open_for_instance(instance.id.value, now=now)
+            uow.timers.cancel_open_for_instance(instance.id.value)
+            instance = self._terminate_instance(
+                uow, instance, WorkflowInstanceStatus.REJECTED, tenant=tenant, now=now
+            )
+            self._notify_requester(uow, instance, tenant=tenant, now=now)
+            instance_status = instance.status
 
-            self._append_event(
-                uow,
-                tenant=tenant,
-                instance_id=instance.id,
-                event_type="task.decided",
-                node_id=task.node_id,
-                actor_type="user",
-                now=now,
-                detail={
-                    "task_id": str(task.id.value),
-                    "step_index": task.step_index,
-                    "decision": command.decision,
-                    "role": command.approver_role,
-                },
-            )
-            self._enqueue(
-                uow,
-                tenant=tenant,
-                event_type="task.decided.v1",
-                payload={
-                    "instance_id": str(instance.id.value),
-                    "tenant_id": str(tenant.value),
-                    "task_id": str(task.id.value),
-                    "step_index": task.step_index,
-                    "decision": command.decision,
-                },
-                now=now,
-            )
-            uow.commit()
+        self._append_event(
+            uow,
+            tenant=tenant,
+            instance_id=instance.id,
+            event_type="task.decided",
+            node_id=task.node_id,
+            actor_type="user",
+            now=now,
+            detail={
+                "task_id": str(task.id.value),
+                "step_index": task.step_index,
+                "decision": decision,
+                "role": task.approver_role,
+            },
+        )
+        self._enqueue(
+            uow,
+            tenant=tenant,
+            event_type="task.decided.v1",
+            payload={
+                "instance_id": str(instance.id.value),
+                "tenant_id": str(tenant.value),
+                "task_id": str(task.id.value),
+                "step_index": task.step_index,
+                "decision": decision,
+            },
+            now=now,
+        )
         return DecisionResult(
             task_id=task.id.value,
             step_index=task.step_index,
             instance_id=instance.id.value,
-            decision=command.decision,
+            decision=decision,
             duplicate=False,
             instance_status=instance_status.value,
             activated_task_id=activated_task_id,
+            required_role=task.approver_role,
+            next_approval_role=next_role,
+            next_task_assigned_user_id=next_assignee,
         )
 
     # ------------------------------------------------------------ cancel
@@ -725,6 +797,9 @@ class WorkflowRuntimeService:
                 step_index=active_task.step_index,
                 approver_role=active_task.approver_role,
                 status=active_task.status.value,
+                assigned_user_id=(
+                    active_task.assigned_user_id.value if active_task.assigned_user_id else None
+                ),
             )
             if active_task is not None
             else None
