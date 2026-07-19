@@ -175,6 +175,11 @@ rollback ve duplicate membership.
 .\.venv\Scripts\python.exe -m flowpilot.worker --check
 ```
 
+Bu kapıların tamamı CI'da otomatik koşar ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+`backend` job; migration fresh-upgrade doğrulaması `migration-verify` job'ında disposable
+PostgreSQL üzerinde). Local'de hepsini tek seferde çalıştırmak için:
+[`scripts/release_verify.ps1`](../../scripts/release_verify.ps1).
+
 ## Entrypoint'ler
 
 | | Entrypoint |

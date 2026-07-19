@@ -116,6 +116,8 @@ Vitest + Testing Library. **105 test; coverage ~%97 statements/lines, ~%93 branc
 
 `npm audit --audit-level=high`: **temiz** (0 high/critical). Not: Next transitive'i `postcss` üzerinden **2 moderate** advisory taşır; tek "düzeltme" Next'i kırıcı biçimde düşürmektir (yapılmadı). CSS stringify XSS'i yalnız güvenilmeyen CSS işlense geçerlidir — kabul edildi.
 
+Bu kapılar CI'da otomatik koşar ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) `frontend` job) ve local'de [`scripts/release_verify.ps1`](../../scripts/release_verify.ps1) ile toplu çalıştırılabilir.
+
 ## Canlı Supabase durumu ✅ Doğrulandı (2026-07-15)
 
 Canlı Supabase kabul testi **geçti** (OQ-009/OQ-010 — kapandı; bkz. [docs/open-questions.md](../../docs/open-questions.md)):

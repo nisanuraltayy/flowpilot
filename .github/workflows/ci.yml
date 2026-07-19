@@ -1,0 +1,147 @@
+name: CI
+
+# FlowPilot CI — backend + frontend kalite kapıları.
+#
+# Güvenlik notu: Bu workflow GERÇEK secret GEREKTİRMEZ. Testler fake/kontrollü auth
+# kullanır; Supabase gerçek anahtarları CI için gerekli değildir ve buraya YAZILMAZ.
+# Migration doğrulaması disposable (ephemeral) bir PostgreSQL üzerinde yapılır;
+# aşağıdaki DB parolaları YALNIZ o tek-kullanımlık servis içindir (gerçek secret değil).
+# İzinler minimumdur (contents: read); hiçbir job'a write verilmez.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint · type · boundaries · tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install backend (editable + dev)
+        run: pip install -e "apps/backend[dev]"
+
+      - name: Ruff check
+        run: ruff check apps/backend/src apps/backend/tests scripts
+
+      - name: Ruff format check
+        run: ruff format --check apps/backend/src apps/backend/tests scripts
+
+      - name: mypy (strict)
+        run: mypy --config-file apps/backend/pyproject.toml apps/backend/src
+
+      - name: Import boundaries (AST)
+        run: python scripts/check_import_boundaries.py apps/backend/src
+
+      - name: import-linter contracts
+        run: lint-imports --config apps/backend/pyproject.toml
+
+      - name: Worker composition root check
+        run: python -m flowpilot.worker --check
+
+      # Integration/RLS/migration testleri Testcontainers ile disposable PostgreSQL
+      # (postgres:17.10-alpine) başlatır; ubuntu-latest runner'ında Docker hazırdır.
+      - name: pytest (unit + integration + RLS + migration)
+        run: pytest apps/backend/tests -q
+
+  migration-verify:
+    name: Migration fresh upgrade 0001→head (disposable Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.10-alpine
+        env:
+          POSTGRES_USER: ci_admin
+          POSTGRES_PASSWORD: ci_ephemeral_admin_pw
+          POSTGRES_DB: flowpilot_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_admin -d flowpilot_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Tek-kullanımlık CI servisi için ephemeral parolalar (GERÇEK secret DEĞİL).
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: flowpilot_ci
+      POSTGRES_USER: ci_admin
+      POSTGRES_PASSWORD: ci_ephemeral_admin_pw
+      POSTGRES_APP_PASSWORD: ci_ephemeral_app_pw
+      POSTGRES_MIGRATION_PASSWORD: ci_ephemeral_migrator_pw
+      MIGRATION_DATABASE_URL: postgresql+psycopg://flowpilot_migrator:ci_ephemeral_migrator_pw@localhost:5432/flowpilot_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install backend (editable + dev)
+        run: pip install -e "apps/backend[dev]"
+
+      - name: Provision flowpilot roles (idempotent, disposable DB)
+        run: python scripts/provision_local_database.py
+
+      - name: Alembic fresh upgrade to head
+        run: python -m alembic -c apps/backend/alembic.ini upgrade head
+
+      - name: Assert current revision is 0006 (head)
+        run: |
+          CURRENT="$(python -m alembic -c apps/backend/alembic.ini current 2>/dev/null | tail -1)"
+          echo "alembic current: $CURRENT"
+          echo "$CURRENT" | grep -q "0006" || { echo "Beklenen head 0006 değil"; exit 1; }
+
+  frontend:
+    name: Frontend (lint · type · test · build · audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install (npm ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test + coverage
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      # High/critical bulgu CI'ı başarısız yapar. `npm audit fix --force` KULLANILMAZ.
+      - name: Dependency audit (high)
+        run: npm audit --audit-level=high

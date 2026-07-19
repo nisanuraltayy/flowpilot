@@ -10,13 +10,27 @@
 #   - complexity yalnızca XS | S | M | L olabilir. XL YASAK.
 #   - Story "ready" değilse agent implementasyona BAŞLAMAZ.
 #   - Açık karar kilidi olan story "blocked" durumundadır.
-#   - Bu dosyadaki hiçbir story şu an implemente edilmemiştir. Repository bootstrap komutu bekleniyor.
+#   - Dikey dilimin uçtan uca akışı çalışır durumdadır (MVP v0.1.0 canlı kabul PASS,
+#     2026-07-19, commit c9043e8). Bireysel story `status` alanları KORUNMUŞTUR:
+#     yalnızca acceptance_criteria'sı TAM karşılanan story `done` işaretlenir; MVP dışı
+#     kalan kısımları (ör. changes_requested, dosya eki, tam RBAC) olan story'ler `done`
+#     YAPILMAMIŞTIR. Bkz. docs/releases/mvp-v0.1.0.md.
 
 meta:
   version: "0.2"
   created_at: "2026-07-14"
-  updated_at: "2026-07-14"     # owner kararları işlendi (Supabase Auth, 3 kademeli eşik, port zorunlulukları)
+  updated_at: "2026-07-19"     # MVP v0.1.0 canlı kabul PASS milestone'u kaydedildi (story status'leri değişmedi)
   scope_source: docs/product/mvp-scope-v0.1.md
+  mvp_release:
+    version: "v0.1.0"
+    live_acceptance: PASS
+    date: "2026-07-19"
+    accepted_commit: c9043e8
+    record: docs/releases/mvp-v0.1.0.md
+    note: >
+      Uçtan uca satın alma talebi + sıralı onay + timeline akışı canlı kabul edildi.
+      Gerçek cloud deployment YAPILMADI (LOCK-006 açık). Bireysel story done-durumları
+      bu milestone tarafından otomatik değiştirilmez.
   slice: purchase-request
   flow: >
     Kullanıcı giriş yapar → organizasyon ve membership belirlenir → satın alma talebi oluşturur

@@ -4,6 +4,9 @@
 - **Tarih:** 2026-07-14
 - **Onaylayan:** Nisa Nur Altay (product owner)
 - **Sürüm:** v0.1
+- **Canlı kabul:** ✅ **MVP v0.1.0 uçtan uca canlı kabul PASS** (2026-07-19, commit `c9043e8`).
+  Release kaydı: [../releases/mvp-v0.1.0.md](../releases/mvp-v0.1.0.md). Gerçek cloud deployment
+  YAPILMADI (LOCK-006 açık); pilot öncesi işler: [pilot-readiness.md](pilot-readiness.md).
 
 ---
 

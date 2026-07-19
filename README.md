@@ -47,6 +47,11 @@ cookie'si → organizasyon adı → server action → Bearer token ile FastAPI �
 için kullanılır (service role key ve Supabase SDK'sı yok); browser'dan hiçbir
 business tablosuna erişilmez — veri yalnız FastAPI üzerinden yönetilir.
 
+> **FlowPilot MVP v0.1.0 — canlı uçtan uca kabul: ✅ PASS (2026-07-19, commit `c9043e8`).**
+> Ayrıntı: [docs/releases/mvp-v0.1.0.md](docs/releases/mvp-v0.1.0.md). Gerçek cloud
+> deployment YAPILMADI; hosting kararı LOCK-006 altında açık. Pilot öncesi işler:
+> [docs/product/pilot-readiness.md](docs/product/pilot-readiness.md).
+
 Tenant izolasyonu PostgreSQL RLS (ENABLE + FORCE) ile gerçek veritabanı
 testlerinde kanıtlanmıştır. Alembic history: `0001`–`0006`. Roller:
 `flowpilot_app`/`flowpilot_migrator` (ikisi de BYPASSRLS'siz).
@@ -66,7 +71,7 @@ lifecycle, transactional outbox + idempotent inbox, persisted timer, RLS, task a
 pinning; `WorkflowRuntimePort` arkasında)**, **`purchase_request` (Create → workflow →
 sıralı onay → timeline; `POST`/`GET`/liste/timeline endpoint'leri)**, **`approval` (role
 assignment + atomik karar use-case + kişisel inbox; decision/inbox endpoint'leri)** ve
-**`audit` (append-only writer + timeline read model)** modüllerindedir — migration `0005`.
+**`audit` (append-only writer + timeline read model)** modüllerindedir — migration `0006`.
 Karar akışı runtime + PR status + ApprovalDecision + audit'i cross-module ATOMİK commit eder;
 diğer 7 bounded context paketi boştur. Public runtime API'si yoktur. **Canlı Supabase kabul
 testi 2026-07-15'te geçti:**
