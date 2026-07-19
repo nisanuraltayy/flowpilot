@@ -94,7 +94,9 @@ ignore = ["S104", "RUF001", "RUF002", "RUF003"]
 [tool.ruff.lint.per-file-ignores]
 # Testlerde `assert` pytest'in temel mekanizmasıdır (S101). S105/S106: test
 # dosyalarındaki fake/izole-container credential'ları gerçek secret değildir.
-"tests/**" = ["S101", "S105", "S106"]
+# S603: worker CLI testleri kendi yazdığımız `python -m flowpilot.worker`
+# subprocess'ini bilerek başlatır (crash-recovery/worker path kanıtı).
+"tests/**" = ["S101", "S105", "S106", "S603"]
 # N818: InvalidAccessToken / ExpiredAccessToken / AuthProviderUnavailable adları
 # owner-onaylı API sözleşmesidir (auth boundary spesifikasyonu); Error soneki
 # bilinçli olarak yoktur.

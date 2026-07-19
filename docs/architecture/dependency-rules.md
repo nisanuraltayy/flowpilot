@@ -156,7 +156,7 @@ Dış dünyaya açılan her yetenek port arkasındadır:
 | Port | Katman | MVP adapter'ı |
 |---|---|---|
 | `AuthProviderPort` | `flowpilot.modules.identity.application` | **Supabase adapter** + fake adapter (ADR-005) |
-| `WorkflowRuntimePort` | `flowpilot.modules.workflow_runtime.application` | Custom PostgreSQL-backed runtime (**spike 12/12 geçti; ADR-004 Accepted, LOCK-003 kapandı** — production E09 henüz yazılmadı) |
+| `WorkflowRuntimePort` | `flowpilot.modules.workflow_runtime.application` | Custom PostgreSQL-backed runtime — **production core yazıldı (Epic E09, 2026-07-19)**: definition versioning, instance/task/event lifecycle, transactional outbox + idempotent inbox, persisted timer, RLS. Henüz Purchase Request'e bağlı değil; public runtime API'si yok |
 | `FileStoragePort` | `flowpilot.modules.document.application` | S3-compatible; local development MinIO adayı |
 | `MalwareScanPort` | `flowpilot.modules.document.application` | MVP'de yalnız no-op/stub (gerçek tarama: pilot-ready) |
 | `NotificationChannelPort` | `flowpilot.modules.notification.application` | In-app kanal (kanal-nötr port; e-posta pilot-ready) |

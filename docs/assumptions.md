@@ -151,6 +151,55 @@ Format:
     bu koruma application katmanındadır. Tenant_id FK'sı ise modül İÇİ olduğu
     için DB düzeyinde tutulmuştur.
 
+- id: ASM-0013
+  statement: >
+    Production Workflow Runtime Core (Epic E09), definition-version / task / event /
+    outbox / inbox sorumluluklarını `workflow_runtime` bounded context'i altında
+    GEÇİCİ OLARAK KONSOLİDE eder. domain-boundaries.md §2 bunları workflow_design
+    (versions), work_management (tasks), approval ve platform (outbox/inbox) modüllerine
+    dağıtır. Çakışmayı önlemek için tüm runtime tabloları 'workflow_runtime_' önekli
+    adlandırılmıştır; hiçbiri o modüllerin planlanan tablo adlarını kullanmaz.
+  impact: medium
+  reversible: true
+  owner: engineering
+  status: unvalidated
+  validation_method: >
+    workflow_design / work_management / approval / platform modülleri oluşturulduğunda
+    (ilerideki story'ler) sınır uzlaştırması yapılır: runtime, o modüllerin açık
+    contract'larını tüketebilir veya ilgili sorumluluk taşınabilir. Tablo öneki
+    ayrımı, taşımayı migration işi hâline getirir (refactor değil).
+  expires_at: 2026-12-01
+  affected_stories: [FP-E09-001, FP-E09-002, FP-E09-003, FP-E09-004, FP-E09-005]
+  note: >
+    Runtime core'un kendi içinde tutarlı bir "engine" olarak kanıtlanması (spike 12/12)
+    ve Purchase Request diliminin çalışabilmesi için bu konsolidasyon owner-onaylı E09
+    kapsamıyla uyumludur. ADR-004 §Karar/3 tasarım kararlarına uyar. Bkz. [[ASM-0004]]
+    (purchase_request modül yerleşimi — benzer explicit-modül gerekçesi).
+
+- id: ASM-0014
+  statement: >
+    Workflow runtime dispatcher (worker) PER-TENANT çalışır: her dispatch turu açık bir
+    tenant context'i altında yürür ve YALNIZ o tenant'ın vadesi gelmiş outbox/timer
+    kayıtlarını RLS altında claim eder. Kuyruk tablolarında queue-geneli bir RLS bypass
+    YOKTUR (spike'ın ayrı worker-rolü yaklaşımının aksine, production tek app rolüyle
+    daha katı izolasyon seçildi). Hangi tenant'ların işleneceği (çoklu-tenant zamanlama)
+    worker'a dışarıdan verilir (--tenant) ve gerçek scheduling ilerideki bir story'dedir.
+  impact: medium
+  reversible: true
+  owner: engineering
+  status: unvalidated
+  validation_method: >
+    Pilot-ready worker operasyonu tasarlanırken: tenant registry contract'ı üzerinden
+    aktif tenant enumerasyonu + adil scheduling eklenir. Şu anki per-tenant dispatch
+    API'si (run_dispatch_pass(tenant_id)) değişmeden bir scheduler tarafından çağrılır.
+  expires_at: 2026-12-01
+  affected_stories: [FP-E09-004, FP-E09-005]
+  note: >
+    Gerekçe: queue-wide görünürlük veren bir RLS policy, sıradan bir app isteğinin de
+    tüm tenant'ların outbox payload'ını görmesine kapı açardı. Per-tenant dispatch bunu
+    engeller (missing context → deny, ALL tablolar). Maliyet: çoklu-tenant tarama için
+    bir üst-katman scheduler gerekir; bu bilinçli olarak ertelendi.
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde

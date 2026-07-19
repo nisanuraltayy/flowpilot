@@ -22,6 +22,25 @@
 - In-memory timer **YASAK**; timer'lar veritabanındadır.
 - `"exactly once"` iddiası **YASAK**. Yaklaşım: at-least-once delivery + idempotent consumer.
 
+## Komutlar
+
+```powershell
+# Import + ayar doğrulama (worker loop BAŞLATMAZ) — kalite kapısı
+python -m flowpilot.worker --check
+
+# Tek dispatch turu (timer ateşle → outbox claim → idempotent işle), sonra çık
+python -m flowpilot.worker --run-once --tenant <uuid> [--worker-id NAME]
+
+# Kontrollü döngü: en çok N tur, turlar arası S sn; SIGTERM/SIGINT'te graceful durur
+python -m flowpilot.worker --run --tenant <uuid> --max-passes N [--interval S]
+```
+
+`--max-passes 0` reddedilir (sonsuz busy loop YASAK). Dispatch **tenant-scoped**
+çalışır: her tur açık bir `--tenant` context'i altında; RLS'e tabidir (BYPASSRLS YOK).
+
 ## Durum
 
-Boş. Kaynak kodu **henüz oluşturulmadı**. Runtime'a bağlı kod, workflow runtime spike'ının 12/12 exit criterion'u geçmeden yazılamaz (ADR-004, LOCK-003).
+✅ **Runtime worker modu yazıldı** (Epic E09). Wiring yalnız [wiring.py](wiring.py)
+composition root'undadır; iş mantığı içermez — `WorkflowRuntimeService.run_dispatch_pass`
+application sınırını çağırır. LOCK-003 kapandı (ADR-004 Accepted, 2026-07-19).
+Notification/read-model consumer'ları ve çoklu-tenant zamanlama sonraki story'lerde eklenecektir.

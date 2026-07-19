@@ -41,15 +41,34 @@ def test_unknown_argument_fails_in_controlled_way(capsys: pytest.CaptureFixture[
     assert CHECK_OK_MESSAGE not in captured.out
 
 
-def test_missing_check_flag_fails_in_controlled_way(capsys: pytest.CaptureFixture[str]) -> None:
-    # Bu aşamada worker loop YOKTUR; argümansız çağrı kontrollü şekilde reddedilir.
+def test_missing_mode_flag_fails_in_controlled_way(capsys: pytest.CaptureFixture[str]) -> None:
+    # Mod seçilmeden çağrı kontrollü reddedilir (--check / --run-once / --run birinden biri).
     with pytest.raises(SystemExit) as exc_info:
         main([])
 
     assert exc_info.value.code == 2
     captured = capsys.readouterr()
-    assert "the following arguments are required: --check" in captured.err
+    assert "one of the arguments --check --run-once --run is required" in captured.err
     assert CHECK_OK_MESSAGE not in captured.out
+
+
+def test_run_once_requires_tenant(capsys: pytest.CaptureFixture[str]) -> None:
+    # --run-once --tenant olmadan: kontrollü hata, worker loop BAŞLATMAZ.
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--run-once"])
+
+    assert exc_info.value.code == 2
+    assert "--tenant zorunludur" in capsys.readouterr().err
+
+
+def test_run_rejects_unbounded_loop(capsys: pytest.CaptureFixture[str]) -> None:
+    # Sonsuz busy loop YASAK: --run --max-passes 0 reddedilir.
+    tenant = "00000000-0000-0000-0000-000000000001"
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--run", "--tenant", tenant, "--max-passes", "0"])
+
+    assert exc_info.value.code == 2
+    assert "sonsuz loop yasak" in capsys.readouterr().err
 
 
 def test_module_entrypoint_runs_as_subprocess_and_exits_zero() -> None:

@@ -267,12 +267,14 @@ Bilinçli olarak yok:
 - **Supabase entegrasyonu, authentication, token doğrulama** — sonraki aşama
 - Login/register/password/session/e-posta doğrulama kodu
 - Team/department, permission/RBAC kataloğu
-- Workflow runtime, purchase request, approval, task kodu
-- Outbox polling, gerçek worker loop, SIGTERM yönetimi
+- Purchase request, approval business modülü, task inbox kodu
 - Audit, notification, MinIO bucket / object storage SDK kodu
 - Dockerfile, backend container image
-- Health dışında API endpoint'i
+- Health dışında API endpoint'i (workflow runtime application servisi içeriden çağrılır; public runtime API'si YOK)
 
-**Var olan domain kodu:** yalnız `identity` (minimal User) ve `organization`
-(Organization/Membership + CreateOrganization use-case'i). Diğer 11 bounded
-context paketi hâlâ boştur.
+**Var olan domain kodu:** `identity` (minimal User), `organization`
+(Organization/Membership + CreateOrganization) ve **`workflow_runtime` (Epic E09 —
+production runtime core: definition versioning, instance/task/event lifecycle,
+transactional outbox + idempotent inbox, persisted timer, RLS; `WorkflowRuntimePort`
+arkasında)**. Worker artık `--check`'e ek olarak `--run-once` / `--run` dispatch
+modlarını destekler. Diğer 10 bounded context paketi hâlâ boştur.

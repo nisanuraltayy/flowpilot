@@ -20,5 +20,5 @@ Kurallar (expand → deploy → backfill → switch → verify → contract, RLS
 Boş ve boş kalacak. `infra/` yalnız [container tanımlarını](../containers/README.md) barındırır.
 
 Gerçek migration history artık **`apps/backend/migrations/versions/`** altındadır
-(revision'lar: `0001` — identity + organization tabloları ve RLS policy'leri; `0002` — auth identity mapping: auth_provider + provider_subject + uq constraint).
+(revision'lar: `0001` — identity + organization tabloları ve RLS policy'leri; `0002` — auth identity mapping: auth_provider + provider_subject + uq constraint; `0003` — workflow runtime core: `workflow_runtime_*` tabloları, RLS ENABLE+FORCE + tenant policy'leri, published version + append-only event immutability trigger'ları).
 Komutlar: [apps/backend/README.md](../../apps/backend/README.md).

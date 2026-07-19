@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -99,6 +100,39 @@ def migrator_sessionmaker(database: DatabaseHandle) -> Iterator[sessionmaker[Ses
         engine.dispose()
 
 
+@pytest.fixture
+def runtime_service(app_sessionmaker: sessionmaker[Session]) -> object:
+    """WorkflowRuntimeService, gerçek flowpilot_app (NOBYPASSRLS) sessionmaker'ı ile."""
+    from tests.integration.workflow_support import build_service
+
+    return build_service(app_sessionmaker)
+
+
+@pytest.fixture
+def tenant_a() -> UUID:
+    return uuid4()
+
+
+@pytest.fixture
+def tenant_b() -> UUID:
+    return uuid4()
+
+
+_TRUNCATE_TABLES = (
+    "workflow_runtime_inbox",
+    "workflow_runtime_timers",
+    "workflow_runtime_events",
+    "workflow_runtime_outbox",
+    "workflow_runtime_tasks",
+    "workflow_runtime_instances",
+    "workflow_runtime_definition_versions",
+    "workflow_runtime_definitions",
+    "organization_memberships",
+    "organization_tenants",
+    "identity_users",
+)
+
+
 @pytest.fixture(autouse=True)
 def _clean_tables(database: DatabaseHandle) -> Iterator[None]:
     """Her testten sonra app tablolarını temizler (migrator owner TRUNCATE eder)."""
@@ -106,11 +140,6 @@ def _clean_tables(database: DatabaseHandle) -> Iterator[None]:
     engine = create_engine(database.migrator_url)
     try:
         with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "TRUNCATE organization_memberships, organization_tenants, "
-                    "identity_users RESTART IDENTITY CASCADE"
-                )
-            )
+            conn.execute(text(f"TRUNCATE {', '.join(_TRUNCATE_TABLES)} RESTART IDENTITY CASCADE"))
     finally:
         engine.dispose()

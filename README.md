@@ -26,8 +26,10 @@ Bu repository **Career Copilot'tan tamamen bağımsızdır**.
 | Database foundation + organization creation core | ✅ Tamamlandı |
 | Supabase Auth + `POST /v1/organizations` | ✅ Tamamlandı |
 | Next.js web + Supabase login + organization onboarding | ✅ Tamamlandı |
-| **Canlı Supabase kabul testi (signup → doğrulama → login → onboarding)** | ✅ **Doğrulandı (2026-07-15)** |
-| İlk dikey dilim (satın alma) | ⏳ Sıradaki |
+| Canlı Supabase kabul testi (signup → doğrulama → login → onboarding) | ✅ Doğrulandı (2026-07-15) |
+| Workflow runtime spike (ADR-004, 12/12 PASS) | ✅ Tamamlandı (2026-07-19) |
+| **Production Workflow Runtime Core (Epic E09)** | ✅ **Tamamlandı (2026-07-19)** |
+| İlk dikey dilim (satın alma / Purchase Request backend) | ⏳ Sıradaki |
 
 **İlk gerçek HTTP iş akışı çalışır durumdadır:**
 
@@ -48,11 +50,15 @@ Tenant izolasyonu PostgreSQL RLS (ENABLE + FORCE) ile gerçek veritabanı
 testlerinde kanıtlanmıştır. Alembic history: `0001` + `0002`. Roller:
 `flowpilot_app`/`flowpilot_migrator` (ikisi de BYPASSRLS'siz).
 
-Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, workflow runtime, purchase
-request, approval, outbox, audit, `Dockerfile`, root npm workspace.
+Repository'de bulunmayanlar (kasıtlı): RBAC kataloğu, purchase request, approval
+business modülü, task inbox, audit, `Dockerfile`, root npm workspace.
 
-Backend domain kodu yalnız `identity` ve `organization` modüllerindedir; diğer 11
-bounded context paketi boştur. **Canlı Supabase kabul testi 2026-07-15'te geçti:**
+Backend domain kodu `identity`, `organization` ve **`workflow_runtime` (Epic E09 —
+production runtime core: definition versioning + immutable version, instance/task/event
+lifecycle, transactional outbox + idempotent inbox, persisted timer, RLS; migration
+`0003`; `WorkflowRuntimePort` arkasında)** modüllerindedir; diğer 10 bounded context
+paketi boştur. Runtime henüz Purchase Request'e bağlı değildir ve public runtime
+API'si yoktur. **Canlı Supabase kabul testi 2026-07-15'te geçti:**
 gerçek signup → e-posta doğrulama → login → ES256 token → `POST /v1/organizations`
 → 201; tenant + aktif owner membership aynı transaction'da oluştu. Ayrıntı:
 [docs/open-questions.md](docs/open-questions.md) (OQ-009/OQ-010 — kapandı).
