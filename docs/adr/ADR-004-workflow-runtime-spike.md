@@ -1,10 +1,21 @@
-# ADR-004 — Workflow Runtime: `WorkflowRuntimePort` Arkasında Custom PostgreSQL-Backed Runtime (Spike Şartına Bağlı)
+# ADR-004 — Workflow Runtime: `WorkflowRuntimePort` Arkasında Custom PostgreSQL-Backed Runtime
 
-- **Durum:** **Accepted (conditional)** — spike exit criteria'ya bağlı
-- **Tarih:** 2026-07-14
+- **Durum:** **Accepted** — spike 12/12 exit criterion geçti (2026-07-19)
+- **Tarih:** 2026-07-14 (koşullu kabul) · 2026-07-19 (kesin kabul)
 - **Karar veren:** Nisa Nur Altay (product owner)
-- **İlgili kilit:** LOCK-003 (**koşullu**)
+- **İlgili kilit:** LOCK-003 (**KAPALI** — 2026-07-19)
 - **İlgili PRD bölümleri:** §9.7, §12, §26, §36.2, §36.3, §37, §38.6
+
+> **Spike sonucu (2026-07-19):** `WorkflowRuntimePort` arkasındaki custom
+> PostgreSQL-backed runtime yaklaşımı, ADR-004'ün **12 exit criterion'unun
+> tamamıyla** (SPK-01…SPK-12) gerçek PostgreSQL üzerinde kanıtlandı. Spike
+> commit'i: **`6cbbb7f`** (`spike: validate PostgreSQL workflow runtime`).
+> Kanıt paketi ve benchmark: [workflow-runtime-spike-results.md](../architecture/workflow-runtime-spike-results.md).
+> Bu ADR `Accepted (conditional)` → **`Accepted`** oldu ve **LOCK-003 kapandı**.
+> **Not:** Production runtime implementasyonu (Epic E09) **henüz yazılmamıştır**;
+> spike kodu ([spikes/workflow-runtime/](../../spikes/workflow-runtime/)) üretim
+> kodu değildir. Bu kabul, E09'un `WorkflowRuntimePort` arkasında yazılabilmesinin
+> önündeki kilidi kaldırır.
 
 ## Bağlam
 
@@ -36,9 +47,17 @@ Buna karşılık dayanıklılık gereksinimleri **taviz verilemez**: worker rest
 ## Karar
 
 1. Workflow yürütme yeteneği **`WorkflowRuntimePort`** arkasına alınır. Uygulamanın geri kalanı somut runtime'ı bilmez.
-2. Custom, hafif, **PostgreSQL-backed** runtime için **önce teknik spike** yapılır.
-3. Spike'ın **12 exit criterion'unun tamamı** kanıtlanmadan runtime'a bağlı kalıcı üretim kodu yazılmaz. Bkz. [workflow-runtime-spike-plan.md](../architecture/workflow-runtime-spike-plan.md).
-4. Spike **başarısız olursa** (bir veya daha fazla exit criterion kanıtlanamazsa) **Temporal yeniden değerlendirilir** ve bu ADR yeni bir ADR ile supersede edilir.
+2. Custom, hafif, **PostgreSQL-backed** runtime için **önce teknik spike** yapıldı ve **12/12 exit criterion geçti** (2026-07-19, commit `6cbbb7f`). Bkz. [workflow-runtime-spike-plan.md](../architecture/workflow-runtime-spike-plan.md) ve [workflow-runtime-spike-results.md](../architecture/workflow-runtime-spike-results.md).
+3. **Kabul edilen runtime tasarımı** (spike ile kanıtlanan, production E09'a taşınacak kararlar):
+   - **Custom PostgreSQL-backed runtime**, `WorkflowRuntimePort` arkasında (uygulama somut runtime'a bağımlı değildir).
+   - **Transactional outbox** — state transition + outbox event + audit **aynı transaction'da** (dual write yok).
+   - **PostgreSQL polling worker** — ayrı broker yok.
+   - **`FOR UPDATE SKIP LOCKED`** + lease ile çoklu-worker güvenli claim.
+   - **Idempotent inbox** (`processed_events`) — at-least-once teslim, duplicate side effect yok.
+   - **Optimistic concurrency** — mutable aggregate'lerde `version` (+ approval için `UNIQUE(step_id)`).
+   - **Persisted timers** — veritabanında; in-memory timer yasak.
+   - **RLS tabanlı tenant izolasyonu** — her tenant tablosunda `tenant_id` + RLS ENABLE/FORCE; worker `NOBYPASSRLS`.
+4. **Temporal**, ancak gelecekte bu kriterlerden biri bozulursa (veya yeniden değerlendirme tetikleyicileri gerçekleşirse) yeniden değerlendirilecek **yedek** olarak kalır; şu aşamada **gerekli değildir**.
 5. **Camunda 8 MVP için elendi.**
 
 ## Gerekçe
@@ -63,7 +82,7 @@ Buna karşılık dayanıklılık gereksinimleri **taviz verilemez**: worker rest
 
 ## Uyum kuralları (agent için bağlayıcı)
 
-1. Spike exit criteria geçmeden **runtime'a bağlı kalıcı üretim kodu YASAK**.
+1. ~~Spike exit criteria geçmeden runtime'a bağlı kalıcı üretim kodu YASAK.~~ **Karşılandı (2026-07-19, 12/12).** Production runtime (E09) artık yazılabilir; §Karar/3'teki tasarım kararlarına uyar.
 2. Uygulama katmanı yalnız `WorkflowRuntimePort` sözleşmesine bağımlıdır; somut runtime sınıflarına doğrudan bağımlılık YASAK.
 3. Published workflow version **immutable**'dır; her instance tam olarak bir version'a bağlıdır.
 4. Timer'lar veritabanında tutulur. In-memory timer YASAK.
@@ -74,6 +93,7 @@ Buna karşılık dayanıklılık gereksinimleri **taviz verilemez**: worker rest
 
 ## Yeniden değerlendirme tetikleyicileri
 
-- Spike exit criteria'dan **herhangi biri** kanıtlanamazsa → Temporal ADR'si açılır.
+- Production runtime (E09) veya sonraki geliştirmelerde bu 12 kriterden **herhangi biri** regresyona uğrar ve düzeltilemezse → Temporal ADR'si açılır (Temporal yedek olarak korunur).
 - Parallel/quorum/sub-workflow node'ları MVP sonrası kapsama girip custom runtime'ın karmaşıklığı yönetilemez hâle gelirse.
+- Tenant başına instance hacmi PostgreSQL polling worker'ın ölçek sınırına dayanırsa.
 - Tenant başına instance hacmi PostgreSQL polling worker'ın ölçek sınırına dayanırsa.

@@ -133,7 +133,7 @@ MVP'de **portu tasarlanır**, ancak yalnız belirtilen adapter uygulanır. Bu, s
 | `NotificationChannelPort` | **Yalnız in-app** | E-posta (pilot-ready), Slack/Teams (sonra) |
 | `MalwareScanPort` | **Yalnız no-op / stub** — `scan_status` alanı ve indirmeyi engelleyen kapı hazır | Gerçek tarama servisi (pilot-ready) |
 | `FileStoragePort` | S3-compatible (local: MinIO) | Production sağlayıcısı (LOCK-006) |
-| `WorkflowRuntimePort` | Custom PostgreSQL-backed (spike şartına bağlı) | Temporal (spike başarısızsa) |
+| `WorkflowRuntimePort` | Custom PostgreSQL-backed (spike 12/12 geçti — ADR-004 Accepted, 2026-07-19) | Temporal (yalnız kriterler ilerde bozulursa) |
 | `ClockPort`, `IdGeneratorPort` | System / fake | — |
 
 **Kural:** `NotificationChannelPort` ve `MalwareScanPort`, MVP'de tek adapter'ları olsa bile **kanal-nötr / sağlayıcı-nötr** tasarlanır. E-posta veya tarama eklemek bir adapter eklemek olmalıdır, bir refactor değil.

@@ -1280,8 +1280,9 @@ stories:
     status: draft
 
   # ==========================================================================
-  # E08 — Workflow Runtime Spike   (LOCK-003 — spike geçmeden üretim kodu YASAK)
+  # E08 — Workflow Runtime Spike   ✅ TAMAMLANDI (2026-07-19, 12/12 PASS → LOCK-003 KAPANDI)
   # Plan: docs/architecture/workflow-runtime-spike-plan.md
+  # Sonuç: docs/architecture/workflow-runtime-spike-results.md · Spike commit: 6cbbb7f
   # ==========================================================================
 
   - id: FP-E08-001
@@ -1329,7 +1330,7 @@ stories:
       - "Harness deterministik ve tekrarlanabilir"
       - "Referans akış çalışıyor"
     complexity: M
-    status: draft
+    status: done             # ✅ 2026-07-19, spike commit 6cbbb7f (spikes/workflow-runtime/)
 
   - id: FP-E08-002
     title: Spike kanıtı — versioning ve determinizm (SPK-01, SPK-02, SPK-03)
@@ -1380,7 +1381,7 @@ stories:
     definition_of_done:
       - "SPK-01, SPK-02, SPK-03 kanıt paketiyle geçti"
     complexity: M
-    status: draft
+    status: done             # ✅ 2026-07-19, spike commit 6cbbb7f
 
   - id: FP-E08-003
     title: Spike kanıtı — eşzamanlılık ve idempotency (SPK-04, SPK-05, SPK-06, SPK-12)
@@ -1439,7 +1440,7 @@ stories:
     definition_of_done:
       - "SPK-04, SPK-05, SPK-06, SPK-12 kanıt paketiyle geçti"
     complexity: L
-    status: draft
+    status: done             # ✅ 2026-07-19, spike commit 6cbbb7f
 
   - id: FP-E08-004
     title: Spike kanıtı — durability, izolasyon ve atomiklik (SPK-07..SPK-11)
@@ -1508,10 +1509,10 @@ stories:
       - "12/12 kriter tamamlandı → spike raporu ve ADR-004 güncellemesi üretildi"
       - "12/12 sağlanamadıysa Temporal ADR'si açıldı"
     complexity: L
-    status: draft
+    status: done             # ✅ 2026-07-19, 12/12 PASS, ADR-004 Accepted, LOCK-003 kapandı
 
   # ==========================================================================
-  # E09 — Workflow Runtime Core   (E08 12/12 geçmeden BAŞLAMAZ)
+  # E09 — Workflow Runtime Core   (E08 12/12 GEÇTİ 2026-07-19 → LOCK-003 kapandı; artık BLOKE DEĞİL. Production HENÜZ yazılmadı)
   # ==========================================================================
 
   - id: FP-E09-001
@@ -1557,7 +1558,7 @@ stories:
       - "Contract test seti tamam"
       - "Fitness check aktif"
     complexity: M
-    status: blocked          # E08 (12/12) geçmeden başlamaz
+    status: draft            # E08 12/12 geçti (2026-07-19); LOCK-003 kapandı → artık BLOKE DEĞİL (production henüz yazılmadı)
 
   - id: FP-E09-002
     title: Instance başlatma ve version binding
@@ -1608,7 +1609,7 @@ stories:
     definition_of_done:
       - "Atomiklik ve version binding testleri geçiyor"
     complexity: M
-    status: blocked
+    status: draft            # LOCK-003 kapandı (2026-07-19); artık bloke değil, production henüz yazılmadı
 
   - id: FP-E09-003
     title: Condition node — güvenli ve deterministik evaluator
@@ -1683,7 +1684,7 @@ stories:
       - "Gerekçe açıklaması timeline'da görünüyor"
       - "FF-08 aktif"
     complexity: M
-    status: blocked
+    status: draft            # LOCK-003 kapandı (2026-07-19); artık bloke değil, production henüz yazılmadı
 
   - id: FP-E09-004
     title: Transactional outbox ve PostgreSQL polling worker
@@ -1747,7 +1748,7 @@ stories:
       - "Bounded retry kanıtlı"
       - "Retention job tanımlı"
     complexity: L
-    status: blocked
+    status: draft            # LOCK-003 kapandı (2026-07-19); artık bloke değil, production henüz yazılmadı
 
   - id: FP-E09-005
     title: Idempotent inbox, terminal guard ve optimistic concurrency
@@ -1808,7 +1809,7 @@ stories:
       - "SPK-06, SPK-08, SPK-09, SPK-12 davranışları üretimde de testli"
       - "FF-07 (handler idempotency) aktif"
     complexity: L
-    status: blocked
+    status: draft            # LOCK-003 kapandı (2026-07-19); artık bloke değil, production henüz yazılmadı
 
   # ==========================================================================
   # E10 — Sequential Approval
@@ -2754,12 +2755,12 @@ summary:
     L: 5
     XL: 0        # XL YASAK
   status_distribution:
-    done: 3       # FP-E00-001, FP-E00-002 (governance), FP-E01-001 (auth provider kararı: Supabase)
-    blocked: 5    # LOCK-003 (runtime core) → FP-E09-001..005
-    draft: 40
-  blocked_reason:
-    LOCK-003: "Workflow runtime spike (E08) 12/12 geçmeden runtime core başlamaz → FP-E09-001..005"
+    done: 7       # FP-E00-001/002 (governance), FP-E01-001 (Supabase kararı), FP-E08-001..004 (spike 12/12)
+    blocked: 0    # LOCK-003 kapandı → E09 artık blocked DEĞİL
+    draft: 41
+  blocked_reason: {}    # Aktif blocking lock yok
   closed_locks:
+    LOCK-003: "✅ KAPANDI 2026-07-19 — workflow runtime spike (E08) 12/12 PASS (commit 6cbbb7f, ADR-004 Accepted). FP-E09-001..005 artık blocked DEĞİL; production implementation henüz YAZILMADI."
     LOCK-004: "✅ KAPANDI 2026-07-14 — Supabase Auth (ADR-005). FP-E01-002 ve FP-E01-003 artık blocked DEĞİL."
   owner_decisions_applied:
     - "Auth: Supabase Auth — yalnız authentication; org/membership/RBAC/tenant FlowPilot domain'inde"

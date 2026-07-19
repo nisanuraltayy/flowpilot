@@ -31,7 +31,7 @@ Bir çatışma olduğunda **üstteki kazanır**. Mevcut kod bu sıranın üstün
 | [ADR-001](docs/adr/ADR-001-backend-stack.md) | Backend: Python + FastAPI + Pydantic + SQLAlchemy + Alembic | Accepted |
 | [ADR-002](docs/adr/ADR-002-frontend-stack.md) | Frontend: Next.js + TypeScript | Accepted |
 | [ADR-003](docs/adr/ADR-003-modular-monolith.md) | Modüler monolit + arka plan worker'ları | Accepted |
-| [ADR-004](docs/adr/ADR-004-workflow-runtime-spike.md) | `WorkflowRuntimePort` arkasında custom PostgreSQL-backed runtime; **önce spike**. Camunda 8 elendi, Temporal yedek | Accepted (koşullu) |
+| [ADR-004](docs/adr/ADR-004-workflow-runtime-spike.md) | `WorkflowRuntimePort` arkasında custom PostgreSQL-backed runtime; spike **12/12 geçti** (2026-07-19). Camunda 8 elendi, Temporal yedek | Accepted |
 | [ADR-005](docs/adr/ADR-005-authentication-boundary.md) | **Supabase Auth** — yalnız authentication. Org/membership/RBAC/tenant FlowPilot domain'inde ve FlowPilot'ın PostgreSQL'inde. Domain, Supabase SDK'sına bağımlı olamaz | Accepted |
 | [ADR-006](docs/adr/ADR-006-postgresql-tenant-isolation.md) | Application-level tenant scope + PostgreSQL RLS (defense-in-depth) | Accepted |
 | [ADR-007](docs/adr/ADR-007-transactional-outbox.md) | Transactional outbox + PostgreSQL-backed polling worker | Accepted |
@@ -57,7 +57,7 @@ Kilit açıkken agent o kararı üretim kodunda **varsayamaz**. Yalnızca karş�
 |---|---|---|---|
 | LOCK-001 | Backend stack | **KAPALI** (ADR-001) | Karara göre ilerle |
 | LOCK-002 | Frontend stack | **KAPALI** (ADR-002) | Karara göre ilerle |
-| LOCK-003 | Workflow runtime | **KOŞULLU** (ADR-004) | Spike exit criteria geçmeden runtime'a bağlı üretim kodu yazma |
+| LOCK-003 | Workflow runtime | **KAPALI** (ADR-004 — spike 12/12 PASS, 2026-07-19) | Custom PostgreSQL-backed runtime `WorkflowRuntimePort` arkasında yazılabilir (E09). Production implementation henüz YOK |
 | LOCK-004 | Auth provider | **KAPALI** (ADR-005 — Supabase Auth) | Supabase yalnız `AuthProviderPort` adapter'ı içinde. Domain SDK'ya bağımlı olamaz. Entegrasyon bootstrap onayından sonra |
 | LOCK-005 | Queue/worker altyapısı | **KAPALI** (ADR-007) | Outbox + PostgreSQL polling worker |
 | LOCK-006 | Hosting / veri bölgesi | **AÇIK** | Deployment provider-neutral kalır |

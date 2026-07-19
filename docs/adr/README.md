@@ -25,7 +25,7 @@ Bu dizin FlowPilot'ın mimari kararlarını tutar. ADR'ler **kaynak öncelik sı
 | [ADR-001](ADR-001-backend-stack.md) | Backend stack: Python + FastAPI + Pydantic + SQLAlchemy + Alembic | Accepted | LOCK-001 |
 | [ADR-002](ADR-002-frontend-stack.md) | Frontend stack: Next.js + TypeScript | Accepted | LOCK-002 |
 | [ADR-003](ADR-003-modular-monolith.md) | Modüler monolit + arka plan worker'ları | Accepted | — |
-| [ADR-004](ADR-004-workflow-runtime-spike.md) | Workflow runtime: `WorkflowRuntimePort` arkasında custom PostgreSQL-backed runtime; önce spike | Accepted (conditional) | LOCK-003 (koşullu) |
+| [ADR-004](ADR-004-workflow-runtime-spike.md) | Workflow runtime: `WorkflowRuntimePort` arkasında custom PostgreSQL-backed runtime (spike 12/12 geçti) | **Accepted** | LOCK-003 ✅ |
 | [ADR-005](ADR-005-authentication-boundary.md) | Authentication boundary: **Supabase Auth** + FlowPilot-owned authorization | **Accepted** | LOCK-004 |
 | [ADR-006](ADR-006-postgresql-tenant-isolation.md) | Tenant izolasyonu: application scope + PostgreSQL RLS | Accepted | — |
 | [ADR-007](ADR-007-transactional-outbox.md) | Transactional outbox + PostgreSQL-backed polling worker | Accepted | LOCK-005 |
@@ -36,9 +36,8 @@ Bu dizin FlowPilot'ın mimari kararlarını tutar. ADR'ler **kaynak öncelik sı
 
 - **LOCK-006** — Hosting ve veri bölgesi. Deployment provider-neutral kalır; ilk aday Render.
 - **LOCK-007** — AI provider ve veri politikası. AI özellikleri gerçek MVP dışındadır.
-- **LOCK-003** — Koşullu: workflow runtime spike'ın 12/12 exit criterion'u geçmesine bağlı.
 
-Kapanan kilitler: LOCK-001 (ADR-001), LOCK-002 (ADR-002), **LOCK-004 (ADR-005 — Supabase Auth)**, LOCK-005 (ADR-007), LOCK-008 (ADR-008).
+Kapanan kilitler: LOCK-001 (ADR-001), LOCK-002 (ADR-002), **LOCK-003 (ADR-004 — workflow runtime spike 12/12 PASS, 2026-07-19)**, **LOCK-004 (ADR-005 — Supabase Auth)**, LOCK-005 (ADR-007), LOCK-008 (ADR-008).
 
 ## Kapsam kaynağı
 

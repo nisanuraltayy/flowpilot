@@ -23,7 +23,7 @@ FlowPilot, KOBİ'ler için çok kiracılı iş akışı ve onay platformudur. Ca
 - Frontend: Next.js + TypeScript (ADR-002)
 - Veritabanı: PostgreSQL; tenant izolasyonu application scope + RLS (ADR-006)
 - Asenkron: transactional outbox + PostgreSQL-backed polling worker (ADR-007)
-- Workflow runtime: `WorkflowRuntimePort` arkasında custom runtime, **spike şartına bağlı** (ADR-004)
+- Workflow runtime: `WorkflowRuntimePort` arkasında custom PostgreSQL-backed runtime; **spike 12/12 geçti, ADR-004 Accepted, LOCK-003 kapandı** (2026-07-19). Production implementation (E09) henüz yazılmadı
 - Authentication: **Supabase Auth** — yalnız kimlik doğrulama (ADR-005). Organization, membership, manager hierarchy, RBAC, authorization ve tenant modeli **FlowPilot domain'inde ve FlowPilot'ın PostgreSQL'inde**. Domain katmanı Supabase SDK'sına **bağımlı olamaz**; entegrasyon yalnız `AuthProviderPort` adapter'ındadır.
 
 **Teslim kapsamı için bağlayıcı doküman:** [docs/product/mvp-scope-v0.1.md](docs/product/mvp-scope-v0.1.md) (owner-approved; PRD §7.1/§24'ün üzerinde). PRD değiştirilmez; mühendislik kuralları (invariant, anti-pattern, state machine, güvenlik) tam olarak bağlayıcı kalır.
@@ -66,7 +66,7 @@ Agent her görevde **bu sırayı** izler:
 |---|---|---|---|
 | LOCK-001 | Backend stack | KAPALI — ADR-001 | Üretim kodu serbest |
 | LOCK-002 | Frontend stack | KAPALI — ADR-002 | Üretim kodu serbest |
-| LOCK-003 | Workflow runtime | KOŞULLU — ADR-004 | Spike + port sözleşmesi. Exit criteria geçmeden runtime'a bağlı kalıcı üretim kodu YASAK |
+| LOCK-003 | Workflow runtime | KAPALI — ADR-004 (spike 12/12 PASS, 2026-07-19) | Custom PostgreSQL-backed runtime `WorkflowRuntimePort` arkasında yazılabilir (E09). Production implementation henüz YOK; ADR-004 §Karar/3 tasarım kararlarına uyulur |
 | LOCK-004 | Auth provider | KAPALI — ADR-005 (**Supabase Auth**) | Supabase yalnız `AuthProviderPort` adapter'ında. Supabase'in org/rol modeline bağımlılık YASAK. Supabase'in DB/RLS'i FlowPilot'ın operasyonel veritabanı olarak kullanılamaz. Entegrasyon **bootstrap onayından sonra** |
 | LOCK-005 | Queue/worker | KAPALI — ADR-007 | Outbox + PostgreSQL polling worker |
 | LOCK-006 | Hosting / veri bölgesi | AÇIK | Provider-neutral Docker. Provider'a özgü manifest YASAK |

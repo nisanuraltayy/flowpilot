@@ -83,7 +83,7 @@ Aşağıdakiler **yalnızca** port arkasında kullanılır:
 | Port | MVP adayı |
 |---|---|
 | `AuthProviderPort` | Supabase Auth / Clerk — **karar açık (ADR-005)**; şimdilik fake adapter |
-| `WorkflowRuntimePort` | Custom PostgreSQL-backed runtime — **spike şartına bağlı (ADR-004)** |
+| `WorkflowRuntimePort` | Custom PostgreSQL-backed runtime — **spike 12/12 geçti; ADR-004 Accepted, LOCK-003 kapandı (2026-07-19)** |
 | `FileStoragePort` | S3-compatible; local development için MinIO adayı |
 | `NotificationChannelPort` | MVP'de yalnız in-app kanal |
 | `ClockPort` | Testte fake clock |

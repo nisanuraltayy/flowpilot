@@ -84,7 +84,7 @@ PRD **değiştirilmez**. Teslim kapsamı için `mvp-scope-v0.1.md`, mühendislik
 | Backend | Python + FastAPI + Pydantic + SQLAlchemy + Alembic | [ADR-001](docs/adr/ADR-001-backend-stack.md) |
 | Frontend | Next.js + TypeScript | [ADR-002](docs/adr/ADR-002-frontend-stack.md) |
 | Mimari | Modüler monolit + ayrı worker process'leri | [ADR-003](docs/adr/ADR-003-modular-monolith.md) |
-| Workflow runtime | `WorkflowRuntimePort` arkasında custom PostgreSQL-backed runtime — **önce spike (12/12 exit criteria)**. Camunda 8 elendi; Temporal yedek | [ADR-004](docs/adr/ADR-004-workflow-runtime-spike.md) |
+| Workflow runtime | `WorkflowRuntimePort` arkasında custom PostgreSQL-backed runtime — **spike 12/12 geçti (2026-07-19), ADR-004 Accepted, LOCK-003 kapandı**. Production (E09) henüz yazılmadı. Camunda 8 elendi; Temporal yedek | [ADR-004](docs/adr/ADR-004-workflow-runtime-spike.md) |
 | Authentication | **Supabase Auth — yalnız kimlik doğrulama.** Organization, membership, RBAC, authorization ve tenant modeli FlowPilot'ın kendi PostgreSQL'inde | [ADR-005](docs/adr/ADR-005-authentication-boundary.md) |
 | Tenant izolasyonu | Application scope **+** PostgreSQL Row Level Security (defense-in-depth) | [ADR-006](docs/adr/ADR-006-postgresql-tenant-isolation.md) |
 | Asenkron işlem | Transactional outbox + PostgreSQL-backed polling worker (broker yok) | [ADR-007](docs/adr/ADR-007-transactional-outbox.md) |

@@ -179,7 +179,7 @@ Kanıt özeti (secret veya kişisel veri içermez):
 | Backend stack | Python + FastAPI + Pydantic + SQLAlchemy + Alembic | ADR-001 | LOCK-001 ✅ |
 | Frontend stack | Next.js + TypeScript | ADR-002 | LOCK-002 ✅ |
 | Mimari | Modüler monolit | ADR-003 | — |
-| Workflow runtime | Custom PostgreSQL-backed, port arkasında, **spike şartına bağlı**. Camunda 8 elendi; Temporal yedek | ADR-004 | LOCK-003 (koşullu) |
+| Workflow runtime | Custom PostgreSQL-backed, port arkasında; **spike 12/12 PASS (2026-07-19)**. Camunda 8 elendi; Temporal yedek | ADR-004 | LOCK-003 ✅ |
 | Authentication | **Supabase Auth** — yalnız kimlik doğrulama. Org/membership/RBAC/tenant FlowPilot domain'inde | ADR-005 | LOCK-004 ✅ |
 | Tenant izolasyonu | Application scope + PostgreSQL RLS | ADR-006 | — |
 | Asenkron işlem | Transactional outbox + PostgreSQL polling worker | ADR-007 | LOCK-005 ✅ |

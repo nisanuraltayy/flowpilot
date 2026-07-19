@@ -2,7 +2,12 @@
 
 İlgili ADR: [ADR-004](../adr/ADR-004-workflow-runtime-spike.md). İlgili PRD bölümleri: §9.7, §36.2, §36.3, §37, §38.6.
 
-> **Bu bir plandır. Spike kodu henüz yazılmamıştır ve owner onayı olmadan yazılmayacaktır.**
+> ✅ **TAMAMLANDI (2026-07-19).** Spike yürütüldü; aşağıdaki **12 exit criterion'un
+> tamamı (SPK-01…SPK-12) geçti (12/12 PASS)**. Kanıt paketi, benchmark ve karar:
+> [workflow-runtime-spike-results.md](workflow-runtime-spike-results.md). Spike commit'i:
+> `6cbbb7f`. Sonuç: ADR-004 `Accepted`, LOCK-003 kapandı. Bu doküman **plan olarak
+> tarihsel referanstır**; bağlayıcı sonuç için sonuç raporuna bakın. Production runtime
+> (Epic E09) henüz yazılmamıştır.
 
 ---
 
