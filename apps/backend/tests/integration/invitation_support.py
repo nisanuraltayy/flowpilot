@@ -30,6 +30,10 @@ from flowpilot.modules.organization.application.invitation_handlers import (
     CreateInvitationHandler,
     RevokeInvitationHandler,
 )
+from flowpilot.modules.organization.application.member_handlers import (
+    ListOrganizationMembersHandler,
+    UpdateOrganizationMemberHandler,
+)
 from flowpilot.modules.organization.infrastructure.accept_url_builder import (
     SettingsInvitationAcceptUrlBuilder,
 )
@@ -63,6 +67,32 @@ def build_preview_invitation_handler(
     return PreviewInvitationHandler(
         preview_query=SqlAlchemyInvitationPreviewQuery(app_sessionmaker),
         clock=SystemClock(),
+    )
+
+
+def build_update_member_handler(
+    app_sessionmaker: sessionmaker[Session],
+) -> UpdateOrganizationMemberHandler:
+    # Wiring'i (SqlAlchemyMemberUpdateUnitOfWork) yansıtır; deps.py ile aynı adapter'lar.
+    from flowpilot.api.wiring import SqlAlchemyMemberUpdateUnitOfWork
+
+    return UpdateOrganizationMemberHandler(
+        unit_of_work_factory=lambda: SqlAlchemyMemberUpdateUnitOfWork(app_sessionmaker),
+        membership_query=SqlAlchemyMembershipQuery(app_sessionmaker),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def build_list_members_handler(
+    app_sessionmaker: sessionmaker[Session],
+) -> ListOrganizationMembersHandler:
+    # deps.py wiring'ini yansıtır (SqlAlchemyMemberListReadModel + membership contract).
+    from flowpilot.api.wiring import SqlAlchemyMemberListReadModel
+
+    return ListOrganizationMembersHandler(
+        member_list_query=SqlAlchemyMemberListReadModel(app_sessionmaker),
+        membership_query=SqlAlchemyMembershipQuery(app_sessionmaker),
     )
 
 
@@ -224,7 +254,8 @@ def create_tenant_with_owner(
         s.execute(
             text(
                 "INSERT INTO organization_memberships (id, tenant_id, user_id, role, status, "
-                "created_at) VALUES (:id, :tenant, :user, 'owner', 'active', now())"
+                "created_at, updated_at, version) "
+                "VALUES (:id, :tenant, :user, 'owner', 'active', now(), now(), 1)"
             ),
             {"id": str(uuid4()), "tenant": str(tenant_id), "user": str(owner_id)},
         )
@@ -250,7 +281,8 @@ def add_member(
         s.execute(
             text(
                 "INSERT INTO organization_memberships (id, tenant_id, user_id, role, status, "
-                "created_at) VALUES (:id, :tenant, :user, :role, :status, now())"
+                "created_at, updated_at, version) "
+                "VALUES (:id, :tenant, :user, :role, :status, now(), now(), 1)"
             ),
             {
                 "id": str(uuid4()),

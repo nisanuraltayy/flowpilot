@@ -97,7 +97,8 @@ def _seed_suspended_membership(
         s.execute(
             text(
                 "INSERT INTO organization_memberships (id, tenant_id, user_id, role, status, "
-                "created_at) VALUES (:id, :t, :u, 'member', 'suspended', now())"
+                "created_at, updated_at, version) "
+                "VALUES (:id, :t, :u, 'member', 'suspended', now(), now(), 1)"
             ),
             {"id": str(uuid4()), "t": str(tenant_id), "u": str(user_id)},
         )
