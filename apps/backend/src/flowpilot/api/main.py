@@ -15,6 +15,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from flowpilot.api.routes import (
+    approval_roles,
     health,
     invitation_access,
     invitations,
@@ -71,6 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(invitations.router)
     app.include_router(invitation_access.router)
     app.include_router(members.router)
+    app.include_router(approval_roles.router)
     app.include_router(purchase_requests.router)
     app.include_router(tasks.router)
 

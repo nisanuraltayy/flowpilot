@@ -20,3 +20,7 @@ class Permission(StrEnum):
     ORGANIZATION_MEMBER_SUSPEND = "organization.member.suspend"
     ORGANIZATION_MEMBER_REACTIVATE = "organization.member.reactivate"
     ORGANIZATION_MEMBER_REMOVE = "organization.member.remove"
+    # Workflow approval rol atamaları (team_manager/finance/general_manager) — gerçek
+    # kullanıcılara atama. Bu, org-yönetişim rolünden (owner/admin/member) AYRIDIR.
+    APPROVAL_ROLE_ASSIGNMENT_READ = "approval.role_assignment.read"
+    APPROVAL_ROLE_ASSIGNMENT_CHANGE = "approval.role_assignment.change"

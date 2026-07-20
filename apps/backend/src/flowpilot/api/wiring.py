@@ -15,8 +15,19 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from flowpilot.modules.approval.application.ports import ApprovalDecisionRepository
+from flowpilot.modules.approval.application.role_assignment_dto import (
+    ApprovalRoleAssignmentView,
+    TargetMembershipInfo,
+)
+from flowpilot.modules.approval.application.role_assignment_ports import (
+    ApprovalRoleAssignmentManagementRepository,
+    TargetMembershipReader,
+)
 from flowpilot.modules.approval.infrastructure.persistence.repositories import (
     SqlAlchemyApprovalDecisionRepository,
+)
+from flowpilot.modules.approval.infrastructure.persistence.role_assignment_management_repository import (  # noqa: E501
+    SqlAlchemyApprovalRoleAssignmentManagementRepository,
 )
 from flowpilot.modules.audit.application.ports import AuditWriterPort
 from flowpilot.modules.audit.infrastructure.persistence.writer import SqlAlchemyAuditWriter
@@ -373,6 +384,146 @@ class SqlAlchemyMemberUpdateUnitOfWork:
         self._session = self._session_factory()
         self.memberships = SqlAlchemyMembershipManagementRepository(self._session)
         self.approval_responsibility = SqlAlchemyApprovalResponsibilityReader(self._session)
+        self.audit = SqlAlchemyAuditWriter(self._session)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        session = self._require_session()
+        try:
+            if exc_type is not None:
+                session.rollback()
+        finally:
+            session.close()
+            self._session = None
+
+    def set_actor_context(self, actor_user_id: UUID) -> None:
+        self._require_session().execute(
+            text("SELECT set_config('app.current_actor_id', :value, true)"),
+            {"value": str(actor_user_id)},
+        )
+
+    def set_tenant_context(self, tenant_id: UUID) -> None:
+        self._require_session().execute(
+            text("SELECT set_config('app.current_tenant_id', :value, true)"),
+            {"value": str(tenant_id)},
+        )
+
+    def commit(self) -> None:
+        self._require_session().commit()
+
+    def rollback(self) -> None:
+        self._require_session().rollback()
+
+    def _require_session(self) -> Session:
+        if self._session is None:
+            raise RuntimeError("UnitOfWork aktif degil — 'with uow:' blogu icinde kullanin.")
+        return self._session
+
+
+class SqlAlchemyApprovalRoleAssignmentListReadModel:
+    """`ApprovalRoleAssignmentListQuery` — approval_role_assignments + identity_users JOIN.
+
+    Cross-module read yalnız composition root'ta. Tenant-scoped (RLS); YALNIZ AKTİF atamalar,
+    canonical role sırasında; YALNIZ email_snapshot döner (provider_subject/auth DÖNMEZ).
+    """
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def list_assignments(self, *, tenant_id: UUID) -> list[ApprovalRoleAssignmentView]:
+        with self._session_factory() as session, session.begin():
+            session.execute(
+                text("SELECT set_config('app.current_tenant_id', :v, true)"),
+                {"v": str(tenant_id)},
+            )
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT a.id AS assignment_id, a.role_key, "
+                        "a.assigned_user_id, u.email_snapshot AS email, a.status, "
+                        "a.version, a.created_at, a.updated_at "
+                        "FROM approval_role_assignments a "
+                        "LEFT JOIN identity_users u ON u.id = a.assigned_user_id "
+                        "WHERE a.tenant_id = :t AND a.status = 'active' "
+                        # Canonical sıra: team_manager → finance → general_manager (sabit).
+                        "ORDER BY CASE a.role_key WHEN 'team_manager' THEN 1 "
+                        "WHEN 'finance' THEN 2 WHEN 'general_manager' THEN 3 ELSE 4 END, "
+                        "a.role_key ASC"
+                    ),
+                    {"t": str(tenant_id)},
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            ApprovalRoleAssignmentView(
+                assignment_id=row["assignment_id"],
+                role_key=str(row["role_key"]),
+                assigned_user_id=row["assigned_user_id"],
+                assigned_user_email=row["email"],
+                status=str(row["status"]),
+                version=int(row["version"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+
+class SqlAlchemyTargetMembershipReader:
+    """`TargetMembershipReader` — organization_memberships + identity_users READ (any status).
+
+    Cross-module read yalnız composition root'ta; update UoW'nin session'ında (tenant context
+    set edilmiş) çalışır. Hedefin ANY-status üyeliğini döndürür → 404 (üye değil) ile 409
+    (aktif değil) ayrımını mümkün kılar. Yalnız email_snapshot döner.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def find(self, *, tenant_id: UUID, user_id: UUID) -> TargetMembershipInfo | None:
+        row = (
+            self._session.execute(
+                text(
+                    "SELECT m.status, u.email_snapshot AS email "
+                    "FROM organization_memberships m "
+                    "LEFT JOIN identity_users u ON u.id = m.user_id "
+                    "WHERE m.tenant_id = :t AND m.user_id = :u"
+                ),
+                {"t": str(tenant_id), "u": str(user_id)},
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            return None
+        return TargetMembershipInfo(status=str(row["status"]), email=row["email"])
+
+
+class SqlAlchemyApprovalRoleAssignmentUpdateUnitOfWork:
+    """rol atama yönetimi + hedef üyelik + audit — TEK session, TEK transaction.
+
+    Cross-module compose (approval + organization read + audit) yalnız composition root'ta
+    (ADR-009 §2b). RLS context transaction-local set_config ile taşınır.
+    """
+
+    assignments: ApprovalRoleAssignmentManagementRepository
+    target_memberships: TargetMembershipReader
+    audit: AuditWriterPort
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+        self._session: Session | None = None
+
+    def __enter__(self) -> SqlAlchemyApprovalRoleAssignmentUpdateUnitOfWork:
+        self._session = self._session_factory()
+        self.assignments = SqlAlchemyApprovalRoleAssignmentManagementRepository(self._session)
+        self.target_memberships = SqlAlchemyTargetMembershipReader(self._session)
         self.audit = SqlAlchemyAuditWriter(self._session)
         return self
 
