@@ -16,6 +16,7 @@ from uuid import UUID
 from flowpilot.modules.audit.application.ports import AuditWriterPort
 from flowpilot.modules.organization.application.invitation_dto import PendingInvitationView
 from flowpilot.modules.organization.domain.invitation import Invitation
+from flowpilot.modules.organization.domain.membership import Membership
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,26 @@ class StoredInvitation:
 
     invitation: Invitation
     request_fingerprint: str | None
+
+
+@dataclass(frozen=True)
+class MembershipRecord:
+    """Bir üyeliğin salt-okunur özeti (herhangi bir status)."""
+
+    membership_id: UUID
+    role: str
+    status: str
+
+
+@dataclass(frozen=True)
+class InvitationPreviewRow:
+    """Davet önizleme read model satırı (token/e-posta içermez)."""
+
+    organization_id: UUID
+    organization_name: str
+    role: str
+    status: str
+    expires_at: datetime
 
 
 class InvitationRepository(Protocol):
@@ -43,6 +64,10 @@ class InvitationRepository(Protocol):
 
     def find_by_id(self, *, tenant_id: UUID, invitation_id: UUID) -> Invitation | None: ...
 
+    def find_by_token_hash(self, *, tenant_id: UUID, token_hash: str) -> Invitation | None:
+        """Tenant scope'unda token_hash ile davet (kabul/önizleme lookup'ı)."""
+        ...
+
     def find_pending_by_email(self, *, tenant_id: UUID, invited_email: str) -> Invitation | None:
         """`status='pending'` davet varsa döner (SÜRE FİLTRESİ YOK).
 
@@ -55,6 +80,16 @@ class InvitationRepository(Protocol):
     def find_by_idempotency_key(
         self, *, tenant_id: UUID, idempotency_key: str
     ) -> StoredInvitation | None: ...
+
+
+class MembershipWriteRepository(Protocol):
+    """Kabul akışı için üyelik yazma/okuma (aynı transaction; tenant-scoped RLS)."""
+
+    def add(self, membership: Membership) -> None: ...
+
+    def find_by_user(self, *, tenant_id: UUID, user_id: UUID) -> MembershipRecord | None:
+        """Tenant + user için üyeliği (HERHANGİ status) döner; yoksa None."""
+        ...
 
 
 class InvitationUnitOfWork(Protocol):
@@ -81,12 +116,47 @@ class InvitationUnitOfWork(Protocol):
     def rollback(self) -> None: ...
 
 
+class InvitationAcceptUnitOfWork(Protocol):
+    """Davet kabulü tek transaction: invitation + membership + audit (wiring'de compose).
+
+    Kabul + üyelik oluşturma + audit AYNI transaction'da commit edilir; başarısızlıkta
+    yarım üyelik veya yarım accepted davet KALMAZ.
+    """
+
+    invitations: InvitationRepository
+    memberships: MembershipWriteRepository
+    audit: AuditWriterPort
+
+    def __enter__(self) -> InvitationAcceptUnitOfWork: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None: ...
+
+    def set_actor_context(self, actor_user_id: UUID) -> None: ...
+
+    def set_tenant_context(self, tenant_id: UUID) -> None: ...
+
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+
 class InvitationQuery(Protocol):
     """Bekleyen davetleri listeleyen salt-okunur read model (tenant-scoped, RLS)."""
 
     def list_pending(
         self, *, tenant_id: UUID, now: datetime, limit: int
     ) -> list[PendingInvitationView]: ...
+
+
+class InvitationPreviewQuery(Protocol):
+    """Davet önizleme read model (auth'suz; tenant-scoped, RLS). Token/e-posta döndürmez."""
+
+    def find(self, *, tenant_id: UUID, token_hash: str) -> InvitationPreviewRow | None: ...
 
 
 class InvitationAcceptUrlBuilder(Protocol):

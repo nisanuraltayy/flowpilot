@@ -29,3 +29,7 @@ class SqlAlchemyUserDirectory:
     def find_user_ids_by_email(self, email: str) -> list[UUID]:
         with self._session_factory() as session:
             return SqlAlchemyUserRepository(session).find_user_ids_by_email(email)
+
+    def find_email_snapshot(self, user_id: UserId) -> str | None:
+        with self._session_factory() as session:
+            return SqlAlchemyUserRepository(session).find_email_snapshot(user_id)

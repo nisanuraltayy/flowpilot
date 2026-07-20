@@ -85,3 +85,9 @@ class SqlAlchemyUserRepository:
             .all()
         )
         return list(rows)
+
+    def find_email_snapshot(self, user_id: UserId) -> str | None:
+        row = self._session.execute(
+            select(users_table.c.email_snapshot).where(users_table.c.id == user_id.value)
+        ).first()
+        return row[0] if row is not None else None

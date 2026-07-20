@@ -27,6 +27,8 @@ class AuditEventType(StrEnum):
     ORGANIZATION_INVITATION_CREATED = "organization.invitation.created"
     ORGANIZATION_INVITATION_REVOKED = "organization.invitation.revoked"
     ORGANIZATION_INVITATION_EXPIRED = "organization.invitation.expired"
+    ORGANIZATION_INVITATION_ACCEPTED = "organization.invitation.accepted"
+    ORGANIZATION_MEMBERSHIP_JOINED = "organization.membership.joined"
 
 
 @dataclass(frozen=True, slots=True)

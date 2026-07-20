@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from flowpilot.modules.organization.domain.invitation import (
     InvalidInvitedEmailError,
+    InvitationNotAcceptableError,
     InvitationNotRevocableError,
     InvitationRoleNotAllowedError,
 )
@@ -19,11 +20,17 @@ __all__ = [
     "DuplicatePendingInvitationError",
     "IdempotencyKeyReuseError",
     "InvalidInvitedEmailError",
+    "InvitationAcceptedByOtherError",
     "InvitationActorNotMemberError",
     "InvitationConcurrencyError",
+    "InvitationEmailMismatchError",
+    "InvitationEmailMissingError",
+    "InvitationExpiredError",
+    "InvitationNotAcceptableError",
     "InvitationNotFoundError",
     "InvitationNotRevocableError",
     "InvitationRoleNotAllowedError",
+    "MembershipInactiveConflictError",
 ]
 
 
@@ -49,3 +56,23 @@ class IdempotencyKeyReuseError(DomainError):
 
 class InvitationConcurrencyError(DomainError):
     """Optimistic concurrency çakışması (stale version) (→ 409)."""
+
+
+class InvitationExpiredError(DomainError):
+    """Süresi dolmuş davet kabul/önizleme (→ 410)."""
+
+
+class InvitationEmailMismatchError(DomainError):
+    """Actor'ın e-postası davet e-postasıyla eşleşmiyor (→ 403)."""
+
+
+class InvitationEmailMissingError(DomainError):
+    """Actor'ın email_snapshot değeri yok; kabul edilemez (→ 403)."""
+
+
+class InvitationAcceptedByOtherError(DomainError):
+    """Davet başka bir kullanıcı tarafından kabul edilmiş (→ 404, sızdırmaz)."""
+
+
+class MembershipInactiveConflictError(DomainError):
+    """Actor'ın mevcut üyeliği suspended/removed; otomatik reaktive edilmez (→ 409)."""

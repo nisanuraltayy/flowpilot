@@ -61,6 +61,10 @@ class InvitationNotRevocableError(DomainError):
     """Davet terminal durumda (accepted); iptal edilemez."""
 
 
+class InvitationNotAcceptableError(DomainError):
+    """Davet bekleyen (pending) değil; kabul edilemez (terminal)."""
+
+
 def normalize_invited_email(raw_email: str) -> str:
     """E-postayı trim + lowercase normalize eder ve minimal doğrular.
 
@@ -163,3 +167,20 @@ class Invitation:
         if self.status in _TERMINAL_STATUSES:
             raise InvitationNotRevocableError("terminal davet iptal edilemez")
         return replace(self, status=InvitationStatus.REVOKED, updated_at=now)
+
+    def accept(self, *, accepted_by: UserId, now: datetime) -> Invitation:
+        """`pending → accepted` geçişi (tek kullanımlık); accepted_by/accepted_at set eder.
+
+        Yalnız `pending` durumdan kabul edilebilir (terminal → hata). Süre kontrolü
+        (expiry) use-case'te yapılır; burada durum koruması (defense-in-depth). `version`
+        DEĞİŞMEZ — optimistic CAS beklenen sürüm olarak repo tarafından kullanılır.
+        """
+        if self.status is not InvitationStatus.PENDING:
+            raise InvitationNotAcceptableError("yalnız bekleyen davet kabul edilebilir")
+        return replace(
+            self,
+            status=InvitationStatus.ACCEPTED,
+            accepted_by_user_id=accepted_by,
+            accepted_at=now,
+            updated_at=now,
+        )
