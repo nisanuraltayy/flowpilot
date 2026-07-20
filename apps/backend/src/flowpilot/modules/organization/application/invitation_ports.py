@@ -1,0 +1,95 @@
+"""Invitation application port'ları (aggregate-specific; generic repository YASAK).
+
+`InvitationUnitOfWork` tek transaction + RLS context + audit yazımını birleştirir.
+`audit` alanı audit'in application contract'ıdır (`AuditWriterPort`) — cross-module
+application importu serbest; audit domain/infrastructure DOĞRUDAN import EDİLMEZ.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from types import TracebackType
+from typing import Protocol
+from uuid import UUID
+
+from flowpilot.modules.audit.application.ports import AuditWriterPort
+from flowpilot.modules.organization.application.invitation_dto import PendingInvitationView
+from flowpilot.modules.organization.domain.invitation import Invitation
+
+
+@dataclass(frozen=True)
+class StoredInvitation:
+    """Idempotency lookup sonucu: davet + saklanan request fingerprint."""
+
+    invitation: Invitation
+    request_fingerprint: str | None
+
+
+class InvitationRepository(Protocol):
+    """Invitation aggregate yazma/okuma port'u (organization-owned tablo)."""
+
+    def add(
+        self,
+        invitation: Invitation,
+        *,
+        idempotency_key: str | None,
+        request_fingerprint: str | None,
+    ) -> None: ...
+
+    def update_checked(self, invitation: Invitation, *, expected_version: int) -> None:
+        """Optimistic CAS ile günceller; stale version → `InvitationConcurrencyError`."""
+        ...
+
+    def find_by_id(self, *, tenant_id: UUID, invitation_id: UUID) -> Invitation | None: ...
+
+    def find_active_pending_by_email(
+        self, *, tenant_id: UUID, invited_email: str, now: datetime
+    ) -> Invitation | None:
+        """Aktif (pending + süresi dolmamış) davet varsa döner (duplicate ön-kontrol)."""
+        ...
+
+    def find_by_idempotency_key(
+        self, *, tenant_id: UUID, idempotency_key: str
+    ) -> StoredInvitation | None: ...
+
+
+class InvitationUnitOfWork(Protocol):
+    """Tek transaction + RLS context + audit (compose; wiring'de kurulur)."""
+
+    invitations: InvitationRepository
+    audit: AuditWriterPort
+
+    def __enter__(self) -> InvitationUnitOfWork: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None: ...
+
+    def set_actor_context(self, actor_user_id: UUID) -> None: ...
+
+    def set_tenant_context(self, tenant_id: UUID) -> None: ...
+
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+
+class InvitationQuery(Protocol):
+    """Bekleyen davetleri listeleyen salt-okunur read model (tenant-scoped, RLS)."""
+
+    def list_pending(
+        self, *, tenant_id: UUID, now: datetime, limit: int
+    ) -> list[PendingInvitationView]: ...
+
+
+class InvitationAcceptUrlBuilder(Protocol):
+    """Ham token'dan gelecekteki kabul URL'ini üreten port (base URL config'ten).
+
+    Hard-coded host YAZMAZ; base URL yoksa relative path döner (proje config kuralı).
+    """
+
+    def build(self, *, tenant_id: UUID, raw_token: str) -> str: ...

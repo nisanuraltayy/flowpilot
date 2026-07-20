@@ -29,3 +29,10 @@ class MembershipId:
     """Bir üyeliğin değişmez kimliği."""
 
     value: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class InvitationId:
+    """Bir organizasyon davetinin değişmez kimliği."""
+
+    value: UUID

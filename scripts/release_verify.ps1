@@ -65,14 +65,14 @@ try {
   # Alembic INFO log'ları stderr'e yazar; PS 5.1'de native stderr, ErrorActionPreference=Stop
   # altında terminating sayılır. Bu adımda geçici olarak Continue'ya alıp stream'leri
   # birleştirip metin eşleştiriyoruz (revision string'i aranır; exit code'a güvenilmez).
-  Invoke-Gate "Backend: alembic current == 0006" {
+  Invoke-Gate "Backend: alembic current == 0007" {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $out = (& $Python -m alembic -c apps/backend/alembic.ini current 2>&1 | Out-String)
     $ErrorActionPreference = $prev
-    $revLine = ($out -split "`n" | Where-Object { $_ -match "0006" }) -join " "
+    $revLine = ($out -split "`n" | Where-Object { $_ -match "0007" }) -join " "
     Write-Host ("alembic current: {0}" -f $revLine.Trim())
-    if ($out -match "0006") { $global:LASTEXITCODE = 0 } else { $global:LASTEXITCODE = 1 }
+    if ($out -match "0007") { $global:LASTEXITCODE = 0 } else { $global:LASTEXITCODE = 1 }
   }
 
   # --- Frontend kalite kapıları ---

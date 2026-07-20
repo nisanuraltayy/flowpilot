@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from flowpilot.api.wiring import (
     SqlAlchemyApprovalDecisionUnitOfWork,
+    SqlAlchemyInvitationUnitOfWork,
     SqlAlchemyPurchaseRequestUnitOfWork,
     SqlAlchemyTaskInboxReadModel,
 )
@@ -61,11 +62,25 @@ from flowpilot.modules.identity.infrastructure.persistence.user_directory import
 )
 from flowpilot.modules.identity.infrastructure.supabase_jwt import SupabaseJwtAuthAdapter
 from flowpilot.modules.organization.application.handler import CreateOrganizationHandler
+from flowpilot.modules.organization.application.invitation_handlers import (
+    CreateInvitationHandler,
+    ListPendingInvitationsHandler,
+    RevokeInvitationHandler,
+)
+from flowpilot.modules.organization.infrastructure.accept_url_builder import (
+    SettingsInvitationAcceptUrlBuilder,
+)
+from flowpilot.modules.organization.infrastructure.persistence.invitation_query import (
+    SqlAlchemyInvitationQuery,
+)
 from flowpilot.modules.organization.infrastructure.persistence.membership_query import (
     SqlAlchemyMembershipQuery,
 )
 from flowpilot.modules.organization.infrastructure.persistence.unit_of_work import (
     SqlAlchemyUnitOfWork,
+)
+from flowpilot.modules.organization.infrastructure.token_generator import (
+    SecretsInvitationTokenGenerator,
 )
 from flowpilot.modules.purchase_request.application.create_handler import (
     CreatePurchaseRequestHandler,
@@ -190,6 +205,42 @@ def get_membership_query(
     session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
 ) -> SqlAlchemyMembershipQuery:
     return SqlAlchemyMembershipQuery(session_factory)
+
+
+def get_create_invitation_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> CreateInvitationHandler:
+    return CreateInvitationHandler(
+        unit_of_work_factory=lambda: SqlAlchemyInvitationUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        email_lookup=SqlAlchemyUserDirectory(session_factory),
+        token_generator=SecretsInvitationTokenGenerator(),
+        accept_url_builder=SettingsInvitationAcceptUrlBuilder(settings.frontend_base_url),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_list_pending_invitations_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> ListPendingInvitationsHandler:
+    return ListPendingInvitationsHandler(
+        invitation_query=SqlAlchemyInvitationQuery(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        clock=SystemClock(),
+    )
+
+
+def get_revoke_invitation_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> RevokeInvitationHandler:
+    return RevokeInvitationHandler(
+        unit_of_work_factory=lambda: SqlAlchemyInvitationUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
 
 
 def _build_role_resolver(session_factory: sessionmaker[Session]) -> DefaultApproverResolver:

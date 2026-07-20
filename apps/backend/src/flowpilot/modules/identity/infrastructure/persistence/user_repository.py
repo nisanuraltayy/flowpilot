@@ -11,8 +11,9 @@ sırasında engine oluşturulmaz.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import Row, insert, select
+from sqlalchemy import Row, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -70,3 +71,17 @@ class SqlAlchemyUserRepository:
             )
         ).first()
         return _row_to_user(row) if row is not None else None
+
+    def find_user_ids_by_email(self, email: str) -> list[UUID]:
+        # email_snapshot benzersiz DEĞİLDİR ve nullable'dır → 0/1/çok satır olabilir.
+        # Karşılaştırma normalize (lower) yapılır; NULL snapshot'lar eşleşmez.
+        rows = (
+            self._session.execute(
+                select(users_table.c.id).where(
+                    func.lower(users_table.c.email_snapshot) == email.strip().lower()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return list(rows)

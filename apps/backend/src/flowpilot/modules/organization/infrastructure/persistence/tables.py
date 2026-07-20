@@ -16,6 +16,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Integer,
     MetaData,
     String,
     Table,
@@ -53,4 +54,32 @@ memberships_table = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     # Aynı kullanıcı aynı tenant içinde iki kez üye olamaz.
     UniqueConstraint("tenant_id", "user_id"),
+)
+
+# organization_invitations (tenant-scoped, RLS). `token_hash` YALNIZ SHA-256 hash'tir;
+# ham token BU TABLODA TUTULMAZ. `role` DB CHECK ile admin/member ile sınırlıdır (owner
+# davetle verilemez). Migration 0007; cross-module identity FK YOK (ASM-0012).
+invitations_table = Table(
+    "organization_invitations",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column(
+        "tenant_id",
+        UUID(as_uuid=True),
+        ForeignKey("organization_tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("invited_email", String(320), nullable=False),
+    Column("role", String(32), nullable=False),
+    Column("token_hash", String(64), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("invited_by_user_id", UUID(as_uuid=True), nullable=False),
+    Column("accepted_by_user_id", UUID(as_uuid=True), nullable=True),
+    Column("accepted_at", DateTime(timezone=True), nullable=True),
+    Column("idempotency_key", String(200), nullable=True),
+    Column("request_fingerprint", String(64), nullable=True),
+    Column("version", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
