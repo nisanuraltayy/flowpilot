@@ -47,6 +47,39 @@ class InvitationPreviewRow:
     expires_at: datetime
 
 
+@dataclass(frozen=True)
+class AcceptIdempotencyRecord:
+    """Davet kabul idempotency kaydı (response snapshot; ham token/token_hash YOK)."""
+
+    tenant_id: UUID
+    actor_user_id: UUID
+    idempotency_key: str
+    request_fingerprint: str
+    invitation_id: UUID
+    membership_id: UUID
+    response_role: str
+    response_status: str
+    response_duplicate: bool
+
+
+class AcceptIdempotencyRepository(Protocol):
+    """Davet kabul idempotency kayıtları (append-only; create idempotency'sinden AYRI).
+
+    `find_for_actor` actor-scoped okur (kullanıcı KENDİ kaydını cross-tenant görür — cross-org
+    conflict tespiti). `add_if_absent` unique(tenant,actor,key) ile tek kazanan sağlar.
+    """
+
+    def find_for_actor(
+        self, *, actor_user_id: UUID, idempotency_key: str
+    ) -> AcceptIdempotencyRecord | None: ...
+
+    def add_if_absent(
+        self, record: AcceptIdempotencyRecord, *, record_id: UUID, now: datetime
+    ) -> bool:
+        """Kaydı ekler; (tenant,actor,key) çakışırsa eklemez ve False döner."""
+        ...
+
+
 class InvitationRepository(Protocol):
     """Invitation aggregate yazma/okuma port'u (organization-owned tablo)."""
 
@@ -125,6 +158,7 @@ class InvitationAcceptUnitOfWork(Protocol):
 
     invitations: InvitationRepository
     memberships: MembershipWriteRepository
+    idempotency: AcceptIdempotencyRepository
     audit: AuditWriterPort
 
     def __enter__(self) -> InvitationAcceptUnitOfWork: ...

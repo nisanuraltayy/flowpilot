@@ -331,24 +331,30 @@ Format:
     davet sonrası başka yolla AKTİF üye olmuşsa: mevcut rol DEĞİŞTİRİLMEZ/yükseltilmez, yeni
     membership oluşturulmaz, davet accepted olarak kapatılır, `duplicate=true` + mevcut rol
     döner. Suspended/removed üyelik OTOMATİK reaktive edilmez → conflict (409). (h) Frontend
-    kabul sayfası ve e-posta gönderimi bu dilimde YOK (sonraki dilim / ertelenmiş).
+    kabul sayfası ve e-posta gönderimi bu dilimde YOK (sonraki dilim / ertelenmiş). (i)
+    Idempotency-Key OPSİYONELDİR: yoksa tek-kullanımlık davet state'i doğal idempotency
+    anchor'ıdır; varsa aynı actor + org + aynı payload replay → önceki sonuç (`duplicate=true`,
+    yeni membership/audit YOK), aynı key farklı payload/org → **409** (hiçbir state değişmeden).
+    Idempotency, `organization_invitation_accept_idempotency` (migration 0008) ile davet
+    OLUŞTURMA idempotency'sinden AYRI tutulur; ham token/token_hash saklanmaz.
   impact: high
   reversible: true
   owner: product
   status: validated
   validation_method: >
-    Owner kararı (2026-07-20): Dilim B kapsamı ve kabul güvenlik kuralları onaylandı.
-    Migration 0007 accepted alanlarını zaten desteklediğinden yeni migration YAZILMADI.
+    Owner kararı (2026-07-20): Dilim B kapsamı, kabul güvenlik kuralları ve accept
+    Idempotency-Key sözleşmesi onaylandı. Kabul idempotency'si için additive migration 0008
+    yazıldı (0007 immutable; create idempotency alanları yeniden kullanılmadı).
   expires_at: 2026-12-01
   affected_stories: [FP-E03-001]
   binding_rule: >
     E-posta eşleşmesi zorunludur; email_snapshot yoksa kabul reddedilir. Davet tek
     kullanımlıktır ve tek actor'a pinlenir. Mevcut aktif üyeliğin rolü kabulle değiştirilmez.
     Suspended/removed üyelik otomatik aktifleştirilmez. Owner rolü hiçbir kabul yolundan
-    oluşmaz. Ham token log/audit/outbox/exception mesajına YAZILMAZ. Not (bilinen sınır):
-    kabul idempotency'si tek-kullanımlık davet state'inden gelir; generic Idempotency-Key
-    store (farklı-payload aynı-key conflict'i) bu dilimde EKLENMEDİ — gereksiz migration'dan
-    kaçınmak için ertelendi, çift-kabul zaten single-use ile engellenir.
+    oluşmaz. Ham token log/audit/outbox/exception mesajına ve idempotency alanlarına YAZILMAZ.
+    Idempotency-Key: same-key/same-payload replay → aynı sonuç (`duplicate=true`); same-key/
+    different-payload veya different-org → 409; header yoksa davet state doğal anchor'dır.
+    accept idempotency kaydı create idempotency'siyle karıştırılmaz (ayrı tablo).
   reference: apps/backend/src/flowpilot/modules/organization/application/invitation_accept.py
 
 - id: ASM-0006

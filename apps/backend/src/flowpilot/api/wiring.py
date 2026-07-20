@@ -21,8 +21,12 @@ from flowpilot.modules.approval.infrastructure.persistence.repositories import (
 from flowpilot.modules.audit.application.ports import AuditWriterPort
 from flowpilot.modules.audit.infrastructure.persistence.writer import SqlAlchemyAuditWriter
 from flowpilot.modules.organization.application.invitation_ports import (
+    AcceptIdempotencyRepository,
     InvitationRepository,
     MembershipWriteRepository,
+)
+from flowpilot.modules.organization.infrastructure.persistence.accept_idempotency_repository import (  # noqa: E501
+    SqlAlchemyAcceptIdempotencyRepository,
 )
 from flowpilot.modules.organization.infrastructure.persistence.invitation_repository import (
     SqlAlchemyInvitationRepository,
@@ -166,6 +170,7 @@ class SqlAlchemyInvitationAcceptUnitOfWork:
 
     invitations: InvitationRepository
     memberships: MembershipWriteRepository
+    idempotency: AcceptIdempotencyRepository
     audit: AuditWriterPort
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
@@ -176,6 +181,7 @@ class SqlAlchemyInvitationAcceptUnitOfWork:
         self._session = self._session_factory()
         self.invitations = SqlAlchemyInvitationRepository(self._session)
         self.memberships = SqlAlchemyMembershipWriteRepository(self._session)
+        self.idempotency = SqlAlchemyAcceptIdempotencyRepository(self._session)
         self.audit = SqlAlchemyAuditWriter(self._session)
         return self
 

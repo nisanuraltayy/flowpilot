@@ -31,6 +31,7 @@ from flowpilot.modules.organization.application.invitation_accept import (
 )
 from flowpilot.modules.organization.application.invitation_dto import AcceptInvitationCommand
 from flowpilot.modules.organization.application.invitation_errors import (
+    IdempotencyKeyReuseError,
     InvitationAcceptedByOtherError,
     InvitationConcurrencyError,
     InvitationEmailMismatchError,
@@ -137,6 +138,7 @@ def accept_invitation(
         MembershipInactiveConflictError,
         InvitationNotAcceptableError,
         InvitationConcurrencyError,
+        IdempotencyKeyReuseError,
     ) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_CONFLICT) from exc
 

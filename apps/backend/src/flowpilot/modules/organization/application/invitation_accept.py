@@ -1,13 +1,20 @@
 """Davet önizleme + kabul use-case'leri (FP-E03-001, Dilim B).
 
 Kabul yetkisi capability (token) + authenticated actor + e-posta eşleşmesidir; merkezi
-owner/admin permission'ına TABİ DEĞİLDİR. Kabul + üyelik oluşturma + audit AYNI
-transaction'da yazılır (yarım state bırakılmaz). Ham token log/audit/exception'a girmez.
+owner/admin permission'ına TABİ DEĞİLDİR. Kabul + üyelik oluşturma + (varsa) idempotency
+kaydı + audit AYNI transaction'da yazılır (yarım state bırakılmaz). Ham token log/audit/
+exception'a ve idempotency alanlarına GİRMEZ.
+
+Idempotency-Key (opsiyonel):
+- Yoksa: tek-kullanımlık davet state'i doğal idempotency anchor'ıdır.
+- Varsa: aynı actor + org + aynı payload replay → önceki sonuç (duplicate=true);
+  aynı key farklı payload/org → 409, hiçbir state değişmeden.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
@@ -19,6 +26,7 @@ from flowpilot.modules.organization.application.invitation_dto import (
     PreviewInvitationResult,
 )
 from flowpilot.modules.organization.application.invitation_errors import (
+    IdempotencyKeyReuseError,
     InvitationAcceptedByOtherError,
     InvitationConcurrencyError,
     InvitationEmailMismatchError,
@@ -28,16 +36,16 @@ from flowpilot.modules.organization.application.invitation_errors import (
     MembershipInactiveConflictError,
 )
 from flowpilot.modules.organization.application.invitation_ports import (
+    AcceptIdempotencyRecord,
     InvitationAcceptUnitOfWork,
     InvitationPreviewQuery,
-    MembershipRecord,
 )
 from flowpilot.modules.organization.domain.invitation import Invitation, InvitationStatus
-from flowpilot.modules.organization.domain.invitation_token import hash_invitation_token
-from flowpilot.modules.organization.domain.membership import (
-    Membership,
-    MembershipStatus,
+from flowpilot.modules.organization.domain.invitation_token import (
+    hash_invitation_token,
+    invitation_accept_fingerprint,
 )
+from flowpilot.modules.organization.domain.membership import Membership, MembershipStatus
 from flowpilot.shared.clock import ClockPort
 from flowpilot.shared.identifiers import MembershipId, TenantId, UserId
 from flowpilot.shared.ids import IdGeneratorPort
@@ -52,6 +60,16 @@ def _is_effectively_expired(invitation: Invitation, now: datetime) -> bool:
     return invitation.status is InvitationStatus.EXPIRED or (
         invitation.status is InvitationStatus.PENDING and invitation.is_expired(now)
     )
+
+
+@dataclass(frozen=True)
+class _AcceptPlan:
+    """Kabul kararının planı: yeni üyelik mi, mevcut aktif üyelik mi (rol korunur)."""
+
+    create_membership: bool
+    membership_id: UUID
+    role: str
+    duplicate: bool
 
 
 class PreviewInvitationHandler:
@@ -84,7 +102,7 @@ class PreviewInvitationHandler:
 
 
 class AcceptInvitationHandler:
-    """Davet kabulü: tek kullanımlık, e-posta eşleşmeli, atomik membership + audit."""
+    """Davet kabulü: tek kullanımlık, e-posta eşleşmeli, atomik membership + idempotency."""
 
     def __init__(
         self,
@@ -103,29 +121,42 @@ class AcceptInvitationHandler:
         token_hash = hash_invitation_token(command.raw_token)
         now = self._clock.now()
         actor_id = command.actor_user_id
+        org = command.organization_id
+        key = command.idempotency_key
+        fingerprint = (
+            invitation_accept_fingerprint(organization_id=str(org), token_hash=token_hash)
+            if key is not None
+            else None
+        )
 
         with self._uow_factory() as uow:
             uow.set_actor_context(actor_id)
-            uow.set_tenant_context(command.organization_id)
+            uow.set_tenant_context(org)
 
-            invitation = uow.invitations.find_by_token_hash(
-                tenant_id=command.organization_id, token_hash=token_hash
-            )
+            # 0) Idempotency ön-kontrol: aynı key kaydı varsa replay/409 (state'e dokunmadan).
+            if key is not None:
+                existing = uow.idempotency.find_for_actor(
+                    actor_user_id=actor_id, idempotency_key=key
+                )
+                if existing is not None:
+                    decision = self._idempotency_decision(
+                        existing, org=org, fingerprint=fingerprint
+                    )
+                    uow.rollback()
+                    return decision
+
+            invitation = uow.invitations.find_by_token_hash(tenant_id=org, token_hash=token_hash)
             if invitation is None or invitation.status is InvitationStatus.REVOKED:
-                raise InvitationNotFoundError(
-                    "davet bulunamadı"
-                )  # 404 (unknown/revoked/cross-tenant)
+                raise InvitationNotFoundError("davet bulunamadı")  # 404
 
             if invitation.status is InvitationStatus.ACCEPTED:
-                # Replay: yalnız kabul eden aynı actor idempotent başarı alır; diğer → 404.
                 result = self._resolve_accepted_replay(uow, invitation, actor_id)
-                uow.rollback()  # replay yeni yazım/audit üretmez
+                uow.rollback()
                 return result
 
             if _is_effectively_expired(invitation, now):
                 raise InvitationExpiredError("davet süresi dolmuş")  # 410
 
-            # E-posta eşleşmesi: email_snapshot yoksa 403; normalize (trim+lower) eşleşmezse 403.
             snapshot = self._email_reader.find_email_snapshot(UserId(actor_id))
             normalized = snapshot.strip().lower() if snapshot else ""
             if not normalized:
@@ -133,108 +164,123 @@ class AcceptInvitationHandler:
             if normalized != invitation.invited_email:
                 raise InvitationEmailMismatchError("e-posta eşleşmiyor")  # 403
 
-            existing = uow.memberships.find_by_user(
-                tenant_id=command.organization_id, user_id=actor_id
-            )
-            if existing is not None:
-                return self._accept_with_existing_membership(
-                    uow, invitation=invitation, actor_id=actor_id, existing=existing, now=now
+            plan = self._plan(uow, invitation=invitation, org=org, actor_id=actor_id)
+
+            # invitation CAS: eşzamanlı iki kabuldan yalnız biri geçer.
+            accepted = invitation.accept(accepted_by=UserId(actor_id), now=now)
+            try:
+                uow.invitations.update_checked(accepted, expected_version=invitation.version)
+            except InvitationConcurrencyError:
+                reread = uow.invitations.find_by_token_hash(tenant_id=org, token_hash=token_hash)
+                if reread is None:
+                    raise
+                result = self._resolve_accepted_replay(uow, reread, actor_id)
+                uow.rollback()
+                return result
+
+            # Idempotency kaydı, ÜYELİK'ten ÖNCE: aynı-key yarışında tek kazanan + kaybeden
+            # membership'e hiç dokunmadan çözülür (409 veya replay).
+            if key is not None and fingerprint is not None:
+                inserted = uow.idempotency.add_if_absent(
+                    AcceptIdempotencyRecord(
+                        tenant_id=org,
+                        actor_user_id=actor_id,
+                        idempotency_key=key,
+                        request_fingerprint=fingerprint,
+                        invitation_id=invitation.id.value,
+                        membership_id=plan.membership_id,
+                        response_role=plan.role,
+                        response_status=MembershipStatus.ACTIVE.value,
+                        response_duplicate=plan.duplicate,
+                    ),
+                    record_id=self._ids.new_uuid(),
+                    now=now,
                 )
-            return self._accept_new_member(
+                if not inserted:
+                    existing = uow.idempotency.find_for_actor(
+                        actor_user_id=actor_id, idempotency_key=key
+                    )
+                    uow.rollback()
+                    if existing is None:
+                        raise IdempotencyKeyReuseError("idempotency çakışması")
+                    return self._idempotency_decision(existing, org=org, fingerprint=fingerprint)
+
+            membership: Membership | None = None
+            if plan.create_membership:
+                membership = Membership.create_active(
+                    id=MembershipId(plan.membership_id),
+                    tenant_id=TenantId(org),
+                    user_id=UserId(actor_id),
+                    role=invitation.role,
+                    created_at=now,
+                )
+                uow.memberships.add(membership)
+            # Audit sırası: invitation.accepted → (yeni üye ise) membership.joined.
+            self._audit_accepted(
                 uow,
-                invitation=invitation,
+                invitation=accepted,
                 actor_id=actor_id,
-                token_hash=token_hash,
-                now=now,
+                membership_id=plan.membership_id,
+                membership_role=plan.role,
+                already_member=not plan.create_membership,
             )
+            if membership is not None:
+                self._audit_joined(uow, membership=membership, actor_id=actor_id)
+            uow.commit()
 
-    # --- yollar --------------------------------------------------------------
-
-    def _accept_new_member(
-        self,
-        uow: InvitationAcceptUnitOfWork,
-        *,
-        invitation: Invitation,
-        actor_id: UUID,
-        token_hash: str,
-        now: datetime,
-    ) -> AcceptInvitationResult:
-        accepted = invitation.accept(accepted_by=UserId(actor_id), now=now)
-        # CAS ÖNCE: eşzamanlı iki kabuldan yalnız biri geçer. Kaybeden → replay çözümü.
-        try:
-            uow.invitations.update_checked(accepted, expected_version=invitation.version)
-        except InvitationConcurrencyError:
-            reread = uow.invitations.find_by_token_hash(
-                tenant_id=invitation.tenant_id.value, token_hash=token_hash
-            )
-            if reread is None:
-                raise
-            result = self._resolve_accepted_replay(uow, reread, actor_id)
-            uow.rollback()
-            return result
-
-        membership = Membership.create_active(
-            id=MembershipId(self._ids.new_uuid()),
-            tenant_id=TenantId(invitation.tenant_id.value),
-            user_id=UserId(actor_id),
-            role=invitation.role,
-            created_at=now,
-        )
-        uow.memberships.add(membership)  # unique(tenant_id,user_id) — yalnız kazanan ekler
-        self._audit_accepted(
-            uow,
-            invitation=accepted,
-            actor_id=actor_id,
-            membership_id=membership.id.value,
-            membership_role=invitation.role.value,
-            already_member=False,
-        )
-        self._audit_joined(uow, membership=membership, actor_id=actor_id)
-        uow.commit()
         return AcceptInvitationResult(
-            organization_id=invitation.tenant_id.value,
-            membership_id=membership.id.value,
-            role=invitation.role.value,
+            organization_id=org,
+            membership_id=plan.membership_id,
+            role=plan.role,
             status=MembershipStatus.ACTIVE.value,
-            duplicate=False,
+            duplicate=plan.duplicate,
         )
 
-    def _accept_with_existing_membership(
+    # --- yardımcılar ---------------------------------------------------------
+
+    def _plan(
         self,
         uow: InvitationAcceptUnitOfWork,
         *,
         invitation: Invitation,
+        org: UUID,
         actor_id: UUID,
-        existing: MembershipRecord,
-        now: datetime,
-    ) -> AcceptInvitationResult:
-        # Suspended/removed (veya active olmayan) → otomatik reaktive YOK → 409.
+    ) -> _AcceptPlan:
+        existing = uow.memberships.find_by_user(tenant_id=org, user_id=actor_id)
+        if existing is None:
+            return _AcceptPlan(
+                create_membership=True,
+                membership_id=self._ids.new_uuid(),
+                role=invitation.role.value,
+                duplicate=False,
+            )
         if existing.status != MembershipStatus.ACTIVE.value:
-            raise MembershipInactiveConflictError("mevcut üyelik aktif değil")
-        # Zaten aktif üye: daveti kapat (accepted), ROLÜ DEĞİŞTİRME, yeni membership YOK.
-        accepted = invitation.accept(accepted_by=UserId(actor_id), now=now)
-        uow.invitations.update_checked(accepted, expected_version=invitation.version)
-        self._audit_accepted(
-            uow,
-            invitation=accepted,
-            actor_id=actor_id,
+            raise MembershipInactiveConflictError("mevcut üyelik aktif değil")  # 409
+        # Zaten aktif üye: rolü DEĞİŞTİRME; daveti kapat, mevcut rolü koru.
+        return _AcceptPlan(
+            create_membership=False,
             membership_id=existing.membership_id,
-            membership_role=existing.role,
-            already_member=True,
+            role=existing.role,
+            duplicate=True,
         )
-        uow.commit()
+
+    def _idempotency_decision(
+        self, record: AcceptIdempotencyRecord, *, org: UUID, fingerprint: str | None
+    ) -> AcceptInvitationResult:
+        # Aynı org + aynı fingerprint → replay (duplicate). Farklı org/payload → 409.
+        if record.tenant_id != org or record.request_fingerprint != fingerprint:
+            raise IdempotencyKeyReuseError("aynı Idempotency-Key farklı payload/org ile kullanıldı")
         return AcceptInvitationResult(
-            organization_id=invitation.tenant_id.value,
-            membership_id=existing.membership_id,
-            role=existing.role,  # mevcut rol KORUNUR (davet rolüne yükseltilmez)
-            status=MembershipStatus.ACTIVE.value,
+            organization_id=record.tenant_id,
+            membership_id=record.membership_id,
+            role=record.response_role,
+            status=record.response_status,
             duplicate=True,
         )
 
     def _resolve_accepted_replay(
         self, uow: InvitationAcceptUnitOfWork, invitation: Invitation, actor_id: UUID
     ) -> AcceptInvitationResult:
-        # Yalnız daveti KABUL EDEN aynı actor idempotent başarı alır; başkası → 404.
         accepted_by = invitation.accepted_by_user_id
         if accepted_by is None or accepted_by.value != actor_id:
             raise InvitationAcceptedByOtherError("davet başka kullanıcıya ait")
@@ -242,7 +288,6 @@ class AcceptInvitationHandler:
             tenant_id=invitation.tenant_id.value, user_id=actor_id
         )
         if membership is None:
-            # Kabul eden actor'ın üyeliği bulunamadı (beklenmez) → sızdırmayan 404.
             raise InvitationAcceptedByOtherError("davet çözümlenemedi")
         return AcceptInvitationResult(
             organization_id=invitation.tenant_id.value,
@@ -251,8 +296,6 @@ class AcceptInvitationHandler:
             status=membership.status,
             duplicate=True,
         )
-
-    # --- audit ---------------------------------------------------------------
 
     def _audit_accepted(
         self,
