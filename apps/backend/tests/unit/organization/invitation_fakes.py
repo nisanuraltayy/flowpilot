@@ -13,8 +13,13 @@ from flowpilot.modules.organization.application.invitation_dto import PendingInv
 from flowpilot.modules.organization.application.invitation_errors import (
     InvitationConcurrencyError,
 )
-from flowpilot.modules.organization.application.invitation_ports import StoredInvitation
+from flowpilot.modules.organization.application.invitation_ports import (
+    InvitationPreviewRow,
+    MembershipRecord,
+    StoredInvitation,
+)
 from flowpilot.modules.organization.domain.invitation import Invitation, InvitationStatus
+from flowpilot.modules.organization.domain.membership import Membership
 
 
 class FakeMembershipQuery:
@@ -109,6 +114,12 @@ class FakeInvitationRepository:
                 return current
         return None
 
+    def find_by_token_hash(self, *, tenant_id: UUID, token_hash: str) -> Invitation | None:
+        for current in self.saved:
+            if current.tenant_id.value == tenant_id and current.token_hash == token_hash:
+                return current
+        return None
+
     def find_pending_by_email(self, *, tenant_id: UUID, invited_email: str) -> Invitation | None:
         # SÜRE FİLTRESİ YOK (gerçek repo ile aynı): süresi geçmiş pending de döner.
         for current in self.saved:
@@ -172,3 +183,83 @@ class FakeInvitationQuery:
     ) -> list[PendingInvitationView]:
         self.calls.append((tenant_id, now, limit))
         return self.views[:limit]
+
+
+class FakeActorEmailReader:
+    def __init__(self, snapshots: dict[UUID, str | None] | None = None) -> None:
+        self._snapshots = snapshots or {}
+
+    def find_email_snapshot(self, user_id: object) -> str | None:
+        return self._snapshots.get(getattr(user_id, "value", user_id))
+
+
+class FakeMembershipWriteRepository:
+    """In-memory üyelik yazma/okuma (kabul akışı); unique(tenant,user) taklit eder."""
+
+    def __init__(self, seed: dict[tuple[UUID, UUID], MembershipRecord] | None = None) -> None:
+        self.records: dict[tuple[UUID, UUID], MembershipRecord] = dict(seed) if seed else {}
+        self.added: list[Membership] = []
+
+    def add(self, membership: Membership) -> None:
+        key = (membership.tenant_id.value, membership.user_id.value)
+        if key in self.records:
+            raise RuntimeError("unique(tenant_id,user_id) ihlali (fake)")
+        self.records[key] = MembershipRecord(
+            membership_id=membership.id.value,
+            role=membership.role.value,
+            status=membership.status.value,
+        )
+        self.added.append(membership)
+
+    def find_by_user(self, *, tenant_id: UUID, user_id: UUID) -> MembershipRecord | None:
+        return self.records.get((tenant_id, user_id))
+
+
+class FakeInvitationAcceptUnitOfWork:
+    """invitations + memberships + audit; tek transaction sayaçları."""
+
+    def __init__(
+        self,
+        invitations: FakeInvitationRepository,
+        memberships: FakeMembershipWriteRepository,
+        audit: FakeAuditWriter,
+    ) -> None:
+        self.invitations = invitations
+        self.memberships = memberships
+        self.audit = audit
+        self.committed = 0
+        self.rolled_back = 0
+        self.tenant_context: UUID | None = None
+        self.actor_context: UUID | None = None
+
+    def __enter__(self) -> FakeInvitationAcceptUnitOfWork:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        if exc_type is not None:
+            self.rolled_back += 1
+
+    def set_actor_context(self, actor_user_id: UUID) -> None:
+        self.actor_context = actor_user_id
+
+    def set_tenant_context(self, tenant_id: UUID) -> None:
+        self.tenant_context = tenant_id
+
+    def commit(self) -> None:
+        self.committed += 1
+
+    def rollback(self) -> None:
+        self.rolled_back += 1
+
+
+class FakeInvitationPreviewQuery:
+    def __init__(self, rows: dict[tuple[UUID, str], InvitationPreviewRow] | None = None) -> None:
+        self._rows = rows or {}
+
+    def find(self, *, tenant_id: UUID, token_hash: str) -> InvitationPreviewRow | None:
+        return self._rows.get((tenant_id, token_hash))
