@@ -28,6 +28,8 @@ from flowpilot.api.wiring import (
     SqlAlchemyApprovalDecisionUnitOfWork,
     SqlAlchemyInvitationAcceptUnitOfWork,
     SqlAlchemyInvitationUnitOfWork,
+    SqlAlchemyMemberListReadModel,
+    SqlAlchemyMemberUpdateUnitOfWork,
     SqlAlchemyPurchaseRequestUnitOfWork,
     SqlAlchemyTaskInboxReadModel,
 )
@@ -71,6 +73,10 @@ from flowpilot.modules.organization.application.invitation_handlers import (
     CreateInvitationHandler,
     ListPendingInvitationsHandler,
     RevokeInvitationHandler,
+)
+from flowpilot.modules.organization.application.member_handlers import (
+    ListOrganizationMembersHandler,
+    UpdateOrganizationMemberHandler,
 )
 from flowpilot.modules.organization.infrastructure.accept_url_builder import (
     SettingsInvitationAcceptUrlBuilder,
@@ -266,6 +272,26 @@ def get_accept_invitation_handler(
     return AcceptInvitationHandler(
         unit_of_work_factory=lambda: SqlAlchemyInvitationAcceptUnitOfWork(session_factory),
         email_reader=SqlAlchemyUserDirectory(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_list_members_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> ListOrganizationMembersHandler:
+    return ListOrganizationMembersHandler(
+        member_list_query=SqlAlchemyMemberListReadModel(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+    )
+
+
+def get_update_member_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> UpdateOrganizationMemberHandler:
+    return UpdateOrganizationMemberHandler(
+        unit_of_work_factory=lambda: SqlAlchemyMemberUpdateUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
         clock=SystemClock(),
         id_generator=UuidGenerator(),
     )

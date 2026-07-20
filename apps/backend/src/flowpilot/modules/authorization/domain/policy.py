@@ -21,10 +21,24 @@ _INVITATION_MANAGEMENT: frozenset[Permission] = frozenset(
     }
 )
 
+# Üye yönetimi coarse gate: owner/admin YÖNETEBİLİR (hedefe göre ince yetki organization
+# domain policy'sinde); member YÖNETEMEZ. read/role/suspend/reactivate/remove.
+_MEMBER_MANAGEMENT: frozenset[Permission] = frozenset(
+    {
+        Permission.ORGANIZATION_MEMBER_READ,
+        Permission.ORGANIZATION_MEMBER_ROLE_CHANGE,
+        Permission.ORGANIZATION_MEMBER_SUSPEND,
+        Permission.ORGANIZATION_MEMBER_REACTIVATE,
+        Permission.ORGANIZATION_MEMBER_REMOVE,
+    }
+)
+
+_OWNER_ADMIN: frozenset[Permission] = _INVITATION_MANAGEMENT | _MEMBER_MANAGEMENT
+
 # Merkezi katalog: rol → izin kümesi. Bilinmeyen/eksik rol → boş küme (deny).
 _ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
-    "owner": _INVITATION_MANAGEMENT,
-    "admin": _INVITATION_MANAGEMENT,
+    "owner": _OWNER_ADMIN,
+    "admin": _OWNER_ADMIN,
     "member": frozenset(),
 }
 

@@ -45,6 +45,8 @@ class SqlAlchemyOrganizationRepository:
                 role=membership.role.value,
                 status=membership.status.value,
                 created_at=membership.created_at,
+                updated_at=membership.updated_at,
+                version=membership.version,
             )
         )
         self._session.flush()

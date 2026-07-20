@@ -53,6 +53,9 @@ memberships_table = Table(
     Column("role", String(32), nullable=False),
     Column("status", String(32), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # version + updated_at: üye yönetimi optimistic concurrency (migration 0009).
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("version", Integer, nullable=False),
     # Aynı kullanıcı aynı tenant içinde iki kez üye olamaz.
     UniqueConstraint("tenant_id", "user_id"),
 )

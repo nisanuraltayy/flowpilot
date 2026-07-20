@@ -41,7 +41,17 @@ def test_unknown_role_denied(permission: Permission) -> None:
         ensure_permitted(role="superadmin", permission=permission)
 
 
+_MEMBER_MGMT_PERMISSIONS = [
+    Permission.ORGANIZATION_MEMBER_READ,
+    Permission.ORGANIZATION_MEMBER_ROLE_CHANGE,
+    Permission.ORGANIZATION_MEMBER_SUSPEND,
+    Permission.ORGANIZATION_MEMBER_REACTIVATE,
+    Permission.ORGANIZATION_MEMBER_REMOVE,
+]
+
+
 def test_member_has_no_permissions_and_owner_has_all() -> None:
     assert permissions_for_role("member") == frozenset()
-    assert permissions_for_role("owner") == frozenset(_INVITATION_PERMISSIONS)
-    assert permissions_for_role("admin") == frozenset(_INVITATION_PERMISSIONS)
+    expected = frozenset(_INVITATION_PERMISSIONS + _MEMBER_MGMT_PERMISSIONS)
+    assert permissions_for_role("owner") == expected
+    assert permissions_for_role("admin") == expected

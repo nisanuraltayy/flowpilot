@@ -155,7 +155,8 @@ def seed_tenant_with_member(
         s.execute(
             text(
                 "INSERT INTO organization_memberships (id, tenant_id, user_id, role, status, "
-                "created_at) VALUES (:id, :tenant, :user, :role, :status, now())"
+                "created_at, updated_at, version) "
+                "VALUES (:id, :tenant, :user, :role, :status, now(), now(), 1)"
             ),
             {
                 "id": str(uuid4()),
