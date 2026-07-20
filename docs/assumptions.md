@@ -315,6 +315,48 @@ Format:
     kontrolü YAZILMAZ. Davet kabulü ve üyelik oluşturma bu dilime EKLENMEZ.
   reference: apps/backend/src/flowpilot/modules/organization/domain/invitation.py
 
+- id: ASM-0019
+  statement: >
+    Davet önizleme + kabul akışı (FP-E03-001, Dilim B) owner-approved kabul semantikleri.
+    (a) Kabul YALNIZ authenticated kullanıcı tarafından yapılır; yetki = capability token +
+    authenticated actor + e-posta eşleşmesidir (owner/admin permission'ına TABİ DEĞİL).
+    (b) Actor'ın `email_snapshot` değeri trim+lowercase normalize edilip davet e-postasıyla
+    EŞLEŞMELİDİR; `email_snapshot` NULL ise davet kabul edilemez (403). (c) Davet TEK
+    KULLANIMLIKTIR: kabul → `accepted` (accepted_by_user_id + accepted_at + version CAS).
+    Aynı actor replay → idempotent `duplicate=true` (yeni membership/audit YOK); farklı actor
+    accepted daveti kullanamaz (404, sızdırmaz). (d) Revoked → 404, expired → 410, cross-tenant
+    token → 404. (e) Kabul + üyelik oluşturma + audit AYNI transaction'dadır; başarısızlıkta
+    yarım üyelik/accepted davet KALMAZ. (f) Kabul yeni kullanıcıya YALNIZ davetteki membership
+    rolünü verir; approval role_key ataması YAPMAZ; owner rolü davetle oluşmaz. (g) Kullanıcı
+    davet sonrası başka yolla AKTİF üye olmuşsa: mevcut rol DEĞİŞTİRİLMEZ/yükseltilmez, yeni
+    membership oluşturulmaz, davet accepted olarak kapatılır, `duplicate=true` + mevcut rol
+    döner. Suspended/removed üyelik OTOMATİK reaktive edilmez → conflict (409). (h) Frontend
+    kabul sayfası ve e-posta gönderimi bu dilimde YOK (sonraki dilim / ertelenmiş). (i)
+    Idempotency-Key OPSİYONELDİR: yoksa tek-kullanımlık davet state'i doğal idempotency
+    anchor'ıdır; varsa aynı actor + org + aynı payload replay → önceki sonuç (`duplicate=true`,
+    yeni membership/audit YOK), aynı key farklı payload/org → **409** (hiçbir state değişmeden).
+    Idempotency, `organization_invitation_accept_idempotency` (migration 0008) ile davet
+    OLUŞTURMA idempotency'sinden AYRI tutulur; ham token/token_hash saklanmaz.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner kararı (2026-07-20): Dilim B kapsamı, kabul güvenlik kuralları ve accept
+    Idempotency-Key sözleşmesi onaylandı. Kabul idempotency'si için additive migration 0008
+    yazıldı (0007 immutable; create idempotency alanları yeniden kullanılmadı).
+  expires_at: 2026-12-01
+  affected_stories: [FP-E03-001]
+  binding_rule: >
+    E-posta eşleşmesi zorunludur; email_snapshot yoksa kabul reddedilir. Davet tek
+    kullanımlıktır ve tek actor'a pinlenir. Mevcut aktif üyeliğin rolü kabulle değiştirilmez.
+    Suspended/removed üyelik otomatik aktifleştirilmez. Owner rolü hiçbir kabul yolundan
+    oluşmaz. Ham token log/audit/outbox/exception mesajına ve idempotency alanlarına YAZILMAZ.
+    Idempotency-Key: same-key/same-payload replay → aynı sonuç (`duplicate=true`); same-key/
+    different-payload veya different-org → 409; header yoksa davet state doğal anchor'dır.
+    accept idempotency kaydı create idempotency'siyle karıştırılmaz (ayrı tablo).
+  reference: apps/backend/src/flowpilot/modules/organization/application/invitation_accept.py
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde

@@ -60,3 +60,29 @@ class Membership:
             status=MembershipStatus.ACTIVE,
             created_at=created_at,
         )
+
+    @classmethod
+    def create_active(
+        cls,
+        *,
+        id: MembershipId,
+        tenant_id: TenantId,
+        user_id: UserId,
+        role: MembershipRole,
+        created_at: datetime,
+    ) -> Membership:
+        """Verilen rolle AKTİF üyelik oluşturur (davet kabulünde kullanılır).
+
+        `owner` bu yolla ATANAMAZ — davetle yalnız admin/member verilir; owner koruması
+        çağıran (davet kabulü) tarafında da uygulanır, burada da savunma amaçlı reddedilir.
+        """
+        if role is MembershipRole.OWNER:
+            raise ValueError("owner rolü davet kabulüyle atanamaz")
+        return cls(
+            id=id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            role=role,
+            status=MembershipStatus.ACTIVE,
+            created_at=created_at,
+        )

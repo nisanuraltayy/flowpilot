@@ -110,6 +110,17 @@ class SqlAlchemyInvitationRepository:
         ).first()
         return _row_to_invitation(row) if row is not None else None
 
+    def find_by_token_hash(self, *, tenant_id: UUID, token_hash: str) -> Invitation | None:
+        # Tenant-scoped token lookup (unique (tenant_id, token_hash)). RLS ek savunma:
+        # yanlış tenant context'inde satır görünmez → cross-tenant token reddedilir.
+        row = self._session.execute(
+            select(invitations_table).where(
+                invitations_table.c.tenant_id == tenant_id,
+                invitations_table.c.token_hash == token_hash,
+            )
+        ).first()
+        return _row_to_invitation(row) if row is not None else None
+
     def find_pending_by_email(self, *, tenant_id: UUID, invited_email: str) -> Invitation | None:
         # SÜRE FİLTRESİ YOK: süresi geçmiş pending de döner (expiry use-case'te belirlenir).
         # Partial unique (status='pending') gereği en fazla bir satır olur.

@@ -105,11 +105,11 @@ jobs:
       - name: Alembic fresh upgrade to head
         run: python -m alembic -c apps/backend/alembic.ini upgrade head
 
-      - name: Assert current revision is 0007 (head)
+      - name: Assert current revision is 0008 (head)
         run: |
           CURRENT="$(python -m alembic -c apps/backend/alembic.ini current 2>/dev/null | tail -1)"
           echo "alembic current: $CURRENT"
-          echo "$CURRENT" | grep -q "0007" || { echo "Beklenen head 0007 değil"; exit 1; }
+          echo "$CURRENT" | grep -q "0008" || { echo "Beklenen head 0008 değil"; exit 1; }
 
   frontend:
     name: Frontend (lint · type · test · build · audit)

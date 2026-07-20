@@ -59,3 +59,31 @@ class RevokeInvitationResult:
     invitation_id: UUID
     status: str
     duplicate: bool
+
+
+@dataclass(frozen=True)
+class PreviewInvitationResult:
+    """Davet önizleme sonucu — minimal, güvenli (token/tam e-posta yok)."""
+
+    organization_id: UUID
+    organization_name: str
+    role: str
+    status: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class AcceptInvitationCommand:
+    organization_id: UUID
+    actor_user_id: UUID
+    raw_token: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True)
+class AcceptInvitationResult:
+    organization_id: UUID
+    membership_id: UUID
+    role: str
+    status: str
+    duplicate: bool

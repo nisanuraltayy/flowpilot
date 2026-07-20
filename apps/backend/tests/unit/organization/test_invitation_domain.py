@@ -11,6 +11,7 @@ from flowpilot.modules.organization.domain.invitation import (
     INVITATION_TTL,
     InvalidInvitedEmailError,
     Invitation,
+    InvitationNotAcceptableError,
     InvitationNotRevocableError,
     InvitationRoleNotAllowedError,
     InvitationStatus,
@@ -21,11 +22,15 @@ from flowpilot.modules.organization.domain.invitation_token import (
     hash_invitation_token,
     invitation_request_fingerprint,
 )
-from flowpilot.modules.organization.domain.membership import MembershipRole
+from flowpilot.modules.organization.domain.membership import (
+    Membership,
+    MembershipRole,
+    MembershipStatus,
+)
 from flowpilot.modules.organization.infrastructure.token_generator import (
     SecretsInvitationTokenGenerator,
 )
-from flowpilot.shared.identifiers import InvitationId, TenantId, UserId
+from flowpilot.shared.identifiers import InvitationId, MembershipId, TenantId, UserId
 
 _NOW = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
 
@@ -181,3 +186,57 @@ def test_expire_non_pending_raises() -> None:
     revoked = replace(_pending(), status=InvitationStatus.REVOKED)
     with pytest.raises(InvitationNotRevocableError):
         revoked.expire(now=_NOW)
+
+
+# --- accept geçişi -----------------------------------------------------------
+
+
+def test_accept_pending_sets_accepted_fields() -> None:
+    invitation = _pending()
+    actor = UserId(uuid4())
+    later = _NOW + timedelta(hours=2)
+    accepted = invitation.accept(accepted_by=actor, now=later)
+    assert accepted.status is InvitationStatus.ACCEPTED
+    assert accepted.accepted_by_user_id == actor
+    assert accepted.accepted_at == later
+    assert accepted.updated_at == later
+    assert accepted.version == invitation.version  # CAS beklenen sürüm; repo artırır
+
+
+@pytest.mark.parametrize(
+    "status",
+    [InvitationStatus.ACCEPTED, InvitationStatus.REVOKED, InvitationStatus.EXPIRED],
+)
+def test_accept_non_pending_raises(status: InvitationStatus) -> None:
+    from dataclasses import replace
+
+    terminal = replace(_pending(), status=status)
+    with pytest.raises(InvitationNotAcceptableError):
+        terminal.accept(accepted_by=UserId(uuid4()), now=_NOW)
+
+
+# --- active membership factory ----------------------------------------------
+
+
+@pytest.mark.parametrize("role", [MembershipRole.ADMIN, MembershipRole.MEMBER])
+def test_create_active_membership_admin_member(role: MembershipRole) -> None:
+    membership = Membership.create_active(
+        id=MembershipId(uuid4()),
+        tenant_id=TenantId(uuid4()),
+        user_id=UserId(uuid4()),
+        role=role,
+        created_at=_NOW,
+    )
+    assert membership.role is role
+    assert membership.status is MembershipStatus.ACTIVE
+
+
+def test_create_active_membership_rejects_owner() -> None:
+    with pytest.raises(ValueError, match="owner"):
+        Membership.create_active(
+            id=MembershipId(uuid4()),
+            tenant_id=TenantId(uuid4()),
+            user_id=UserId(uuid4()),
+            role=MembershipRole.OWNER,
+            created_at=_NOW,
+        )

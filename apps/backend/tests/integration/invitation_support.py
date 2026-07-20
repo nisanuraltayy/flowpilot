@@ -13,11 +13,18 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from flowpilot.api.wiring import SqlAlchemyInvitationUnitOfWork
+from flowpilot.api.wiring import (
+    SqlAlchemyInvitationAcceptUnitOfWork,
+    SqlAlchemyInvitationUnitOfWork,
+)
 from flowpilot.modules.identity.application.auth import AuthenticatedIdentity
 from flowpilot.modules.identity.domain.auth_provider import AuthProvider
 from flowpilot.modules.identity.infrastructure.persistence.user_directory import (
     SqlAlchemyUserDirectory,
+)
+from flowpilot.modules.organization.application.invitation_accept import (
+    AcceptInvitationHandler,
+    PreviewInvitationHandler,
 )
 from flowpilot.modules.organization.application.invitation_handlers import (
     CreateInvitationHandler,
@@ -25,6 +32,9 @@ from flowpilot.modules.organization.application.invitation_handlers import (
 )
 from flowpilot.modules.organization.infrastructure.accept_url_builder import (
     SettingsInvitationAcceptUrlBuilder,
+)
+from flowpilot.modules.organization.infrastructure.persistence.invitation_preview_query import (
+    SqlAlchemyInvitationPreviewQuery,
 )
 from flowpilot.modules.organization.infrastructure.persistence.membership_query import (
     SqlAlchemyMembershipQuery,
@@ -34,6 +44,85 @@ from flowpilot.modules.organization.infrastructure.token_generator import (
 )
 from flowpilot.shared.clock import SystemClock
 from flowpilot.shared.ids import UuidGenerator
+
+
+def build_accept_invitation_handler(
+    app_sessionmaker: sessionmaker[Session],
+) -> AcceptInvitationHandler:
+    return AcceptInvitationHandler(
+        unit_of_work_factory=lambda: SqlAlchemyInvitationAcceptUnitOfWork(app_sessionmaker),
+        email_reader=SqlAlchemyUserDirectory(app_sessionmaker),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def build_preview_invitation_handler(
+    app_sessionmaker: sessionmaker[Session],
+) -> PreviewInvitationHandler:
+    return PreviewInvitationHandler(
+        preview_query=SqlAlchemyInvitationPreviewQuery(app_sessionmaker),
+        clock=SystemClock(),
+    )
+
+
+def seed_identity(app_sessionmaker: sessionmaker[Session], *, email: str) -> UUID:
+    """identity_users satırı ekler (üyelik YOK); email_snapshot = email. user_id döndürür."""
+    user_id = uuid4()
+    with app_sessionmaker() as s, s.begin():
+        _insert_identity_with_email(s, user_id=user_id, email=email)
+    return user_id
+
+
+def membership_row(
+    app_sessionmaker: sessionmaker[Session], *, tenant_id: UUID, user_id: UUID
+) -> dict[str, object] | None:
+    with app_sessionmaker() as s, s.begin():
+        s.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": str(tenant_id)}
+        )
+        row = (
+            s.execute(
+                text(
+                    "SELECT id, role, status FROM organization_memberships "
+                    "WHERE tenant_id = :t AND user_id = :u"
+                ),
+                {"t": str(tenant_id), "u": str(user_id)},
+            )
+            .mappings()
+            .first()
+        )
+    return dict(row) if row else None
+
+
+def audit_event_count(
+    app_sessionmaker: sessionmaker[Session], *, tenant_id: UUID, event_type: str
+) -> int:
+    with app_sessionmaker() as s, s.begin():
+        s.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": str(tenant_id)}
+        )
+        value = s.execute(
+            text("SELECT count(*) FROM audit_entries WHERE tenant_id = :t AND event_type = :e"),
+            {"t": str(tenant_id), "e": event_type},
+        ).scalar_one()
+    return int(value)
+
+
+def accept_idempotency_count(app_sessionmaker: sessionmaker[Session], *, tenant_id: UUID) -> int:
+    """Bir tenant scope'undaki davet kabul idempotency kaydı sayısı (tenant context ile)."""
+    with app_sessionmaker() as s, s.begin():
+        s.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": str(tenant_id)}
+        )
+        value = s.execute(
+            text(
+                "SELECT count(*) FROM organization_invitation_accept_idempotency "
+                "WHERE tenant_id = :t"
+            ),
+            {"t": str(tenant_id)},
+        ).scalar_one()
+    return int(value)
 
 
 def build_create_invitation_handler(
@@ -98,6 +187,16 @@ def _insert_identity(session: Session, *, user_id: UUID, subject: str) -> None:
             "provider_subject, created_at) VALUES (:id, :email, 'supabase', :sub, now())"
         ),
         {"id": str(user_id), "email": f"{subject}@example.com", "sub": subject},
+    )
+
+
+def _insert_identity_with_email(session: Session, *, user_id: UUID, email: str) -> None:
+    session.execute(
+        text(
+            "INSERT INTO identity_users (id, email_snapshot, auth_provider, "
+            "provider_subject, created_at) VALUES (:id, :email, 'supabase', :sub, now())"
+        ),
+        {"id": str(user_id), "email": email, "sub": str(user_id)},
     )
 
 

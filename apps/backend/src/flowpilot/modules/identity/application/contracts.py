@@ -29,3 +29,13 @@ class UserEmailLookup(Protocol):
     """
 
     def find_user_ids_by_email(self, email: str) -> list[UUID]: ...
+
+
+class ActorEmailReader(Protocol):
+    """Doğrulanmış bir actor'ın `email_snapshot` değerini okuyan salt-okunur contract.
+
+    Davet kabulünde, actor'ın e-postasının davet e-postasıyla eşleşmesi için kullanılır.
+    Snapshot NULL olabilir; o durumda davet kabul edilemez (çağıran karar verir).
+    """
+
+    def find_email_snapshot(self, user_id: UserId) -> str | None: ...

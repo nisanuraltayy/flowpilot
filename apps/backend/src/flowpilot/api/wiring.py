@@ -20,9 +20,19 @@ from flowpilot.modules.approval.infrastructure.persistence.repositories import (
 )
 from flowpilot.modules.audit.application.ports import AuditWriterPort
 from flowpilot.modules.audit.infrastructure.persistence.writer import SqlAlchemyAuditWriter
-from flowpilot.modules.organization.application.invitation_ports import InvitationRepository
+from flowpilot.modules.organization.application.invitation_ports import (
+    AcceptIdempotencyRepository,
+    InvitationRepository,
+    MembershipWriteRepository,
+)
+from flowpilot.modules.organization.infrastructure.persistence.accept_idempotency_repository import (  # noqa: E501
+    SqlAlchemyAcceptIdempotencyRepository,
+)
 from flowpilot.modules.organization.infrastructure.persistence.invitation_repository import (
     SqlAlchemyInvitationRepository,
+)
+from flowpilot.modules.organization.infrastructure.persistence.membership_repository import (
+    SqlAlchemyMembershipWriteRepository,
 )
 from flowpilot.modules.purchase_request.application.dto import InboxItem
 from flowpilot.modules.purchase_request.application.ports import PurchaseRequestRepository
@@ -110,6 +120,68 @@ class SqlAlchemyInvitationUnitOfWork:
     def __enter__(self) -> SqlAlchemyInvitationUnitOfWork:
         self._session = self._session_factory()
         self.invitations = SqlAlchemyInvitationRepository(self._session)
+        self.audit = SqlAlchemyAuditWriter(self._session)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        session = self._require_session()
+        try:
+            if exc_type is not None:
+                session.rollback()
+        finally:
+            session.close()
+            self._session = None
+
+    def set_actor_context(self, actor_user_id: UUID) -> None:
+        self._require_session().execute(
+            text("SELECT set_config('app.current_actor_id', :value, true)"),
+            {"value": str(actor_user_id)},
+        )
+
+    def set_tenant_context(self, tenant_id: UUID) -> None:
+        self._require_session().execute(
+            text("SELECT set_config('app.current_tenant_id', :value, true)"),
+            {"value": str(tenant_id)},
+        )
+
+    def commit(self) -> None:
+        self._require_session().commit()
+
+    def rollback(self) -> None:
+        self._require_session().rollback()
+
+    def _require_session(self) -> Session:
+        if self._session is None:
+            raise RuntimeError("UnitOfWork aktif degil — 'with uow:' blogu icinde kullanin.")
+        return self._session
+
+
+class SqlAlchemyInvitationAcceptUnitOfWork:
+    """invitations + memberships + audit — TEK session, TEK transaction (davet kabulü).
+
+    Kabul + üyelik oluşturma + audit AYNI transaction'da commit edilir (ADR-009 §2b
+    compose). RLS context transaction-local set_config ile taşınır.
+    """
+
+    invitations: InvitationRepository
+    memberships: MembershipWriteRepository
+    idempotency: AcceptIdempotencyRepository
+    audit: AuditWriterPort
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+        self._session: Session | None = None
+
+    def __enter__(self) -> SqlAlchemyInvitationAcceptUnitOfWork:
+        self._session = self._session_factory()
+        self.invitations = SqlAlchemyInvitationRepository(self._session)
+        self.memberships = SqlAlchemyMembershipWriteRepository(self._session)
+        self.idempotency = SqlAlchemyAcceptIdempotencyRepository(self._session)
         self.audit = SqlAlchemyAuditWriter(self._session)
         return self
 

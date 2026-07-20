@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from flowpilot.api.wiring import (
     SqlAlchemyApprovalDecisionUnitOfWork,
+    SqlAlchemyInvitationAcceptUnitOfWork,
     SqlAlchemyInvitationUnitOfWork,
     SqlAlchemyPurchaseRequestUnitOfWork,
     SqlAlchemyTaskInboxReadModel,
@@ -62,6 +63,10 @@ from flowpilot.modules.identity.infrastructure.persistence.user_directory import
 )
 from flowpilot.modules.identity.infrastructure.supabase_jwt import SupabaseJwtAuthAdapter
 from flowpilot.modules.organization.application.handler import CreateOrganizationHandler
+from flowpilot.modules.organization.application.invitation_accept import (
+    AcceptInvitationHandler,
+    PreviewInvitationHandler,
+)
 from flowpilot.modules.organization.application.invitation_handlers import (
     CreateInvitationHandler,
     ListPendingInvitationsHandler,
@@ -69,6 +74,9 @@ from flowpilot.modules.organization.application.invitation_handlers import (
 )
 from flowpilot.modules.organization.infrastructure.accept_url_builder import (
     SettingsInvitationAcceptUrlBuilder,
+)
+from flowpilot.modules.organization.infrastructure.persistence.invitation_preview_query import (
+    SqlAlchemyInvitationPreviewQuery,
 )
 from flowpilot.modules.organization.infrastructure.persistence.invitation_query import (
     SqlAlchemyInvitationQuery,
@@ -238,6 +246,26 @@ def get_revoke_invitation_handler(
     return RevokeInvitationHandler(
         unit_of_work_factory=lambda: SqlAlchemyInvitationUnitOfWork(session_factory),
         membership_query=SqlAlchemyMembershipQuery(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_preview_invitation_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> PreviewInvitationHandler:
+    return PreviewInvitationHandler(
+        preview_query=SqlAlchemyInvitationPreviewQuery(session_factory),
+        clock=SystemClock(),
+    )
+
+
+def get_accept_invitation_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> AcceptInvitationHandler:
+    return AcceptInvitationHandler(
+        unit_of_work_factory=lambda: SqlAlchemyInvitationAcceptUnitOfWork(session_factory),
+        email_reader=SqlAlchemyUserDirectory(session_factory),
         clock=SystemClock(),
         id_generator=UuidGenerator(),
     )

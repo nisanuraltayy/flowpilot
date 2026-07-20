@@ -37,6 +37,15 @@ def invitation_request_fingerprint(*, invited_email: str, role: str) -> str:
     return hashlib.sha256(f"{invited_email}|{role}".encode()).hexdigest()
 
 
+def invitation_accept_fingerprint(*, organization_id: str, token_hash: str) -> str:
+    """Davet KABUL isteğinin payload parmak izi (Idempotency-Key conflict tespiti).
+
+    `operation | organization_id | token_hash` üzerinden deterministik hash. Ham token
+    veya token_hash DOĞRUDAN saklanmaz; yalnız bu fingerprint hash'inin içinde yer alır.
+    """
+    return hashlib.sha256(f"invitation.accept|{organization_id}|{token_hash}".encode()).hexdigest()
+
+
 class InvitationTokenGeneratorPort(Protocol):
     """Kriptografik güvenli ham token üreten port (injectable — testte deterministik).
 

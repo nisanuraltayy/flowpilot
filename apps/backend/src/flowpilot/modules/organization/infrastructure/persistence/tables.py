@@ -13,6 +13,7 @@ Actor varlığı application katmanında `UserDirectory` ile doğrulanır. Bkz. 
 from __future__ import annotations
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -82,4 +83,29 @@ invitations_table = Table(
     Column("version", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+# organization_invitation_accept_idempotency (tenant-scoped, RLS). Davet KABUL
+# idempotency'si — create idempotency'sinden AYRI. Ham token/token_hash saklamaz.
+# Migration 0008; cross-module identity FK YOK.
+invitation_accept_idempotency_table = Table(
+    "organization_invitation_accept_idempotency",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column(
+        "tenant_id",
+        UUID(as_uuid=True),
+        ForeignKey("organization_tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("actor_user_id", UUID(as_uuid=True), nullable=False),
+    Column("idempotency_key", String(200), nullable=False),
+    Column("request_fingerprint", String(64), nullable=False),
+    Column("invitation_id", UUID(as_uuid=True), nullable=False),
+    Column("membership_id", UUID(as_uuid=True), nullable=False),
+    Column("response_role", String(32), nullable=False),
+    Column("response_status", String(32), nullable=False),
+    Column("response_duplicate", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("tenant_id", "actor_user_id", "idempotency_key"),
 )
