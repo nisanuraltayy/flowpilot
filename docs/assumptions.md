@@ -357,6 +357,58 @@ Format:
     accept idempotency kaydı create idempotency'siyle karıştırılmaz (ayrı tablo).
   reference: apps/backend/src/flowpilot/modules/organization/application/invitation_accept.py
 
+- id: ASM-0020
+  statement: >
+    Üye yönetimi (FP-E03-002, Dilim C) owner-approved yönetim semantikleri. (a) Bu dilim
+    YALNIZ `organization_memberships.role` (owner/admin/member governance rolü) ve `status`
+    yönetir; workflow approval rolleri (`team_manager`/`finance`/`general_manager`
+    = `approval_role_assignments.role_key`) AYRIDIR ve bu dilimde DEĞİŞTİRİLMEZ. (b) Yetki
+    iki katmanlıdır: merkezi coarse permission katalogu (`organization.member.read/role.change/
+    suspend/reactivate/remove`) + hedefe göre ince domain policy. Route içinde dağınık
+    `role == "owner"` kontrolü YAZILMAZ. (c) `owner`: kendisi HARİÇ tüm üyeleri yönetir, owner'a
+    yükseltebilir, başka bir owner'ı düşürebilir (son-owner invariant'ı korunmak şartıyla).
+    `admin`: YALNIZ `member` hedefleri yönetir, member→admin yapabilir, owner VEREMEZ,
+    owner/admin hedeflere DOKUNAMAZ (403). `member`: 403. Non-member: 404 (varlık sızdırmaz).
+    (d) Kullanıcı kendi rol/status/üyeliğini DEĞİŞTİREMEZ → 409. (e) Status geçişleri:
+    active↔suspended, active/suspended→removed. `removed` TERMİNALDİR (reaktive YOK, rol
+    değişimi YOK). Fiziksel DELETE YOK (soft-remove; app rolünden DELETE grant KALDIRILDI,
+    migration 0009). No-op (aynı değere set) idempotenttir → `duplicate=true`, yeni yazım/audit
+    YOK. (f) Son aktif owner invariant'ı: her tenant'ta DAİMA ≥1 aktif owner kalır; owner'ı
+    deaktive eden değişiklik aktif owner satırlarını `FOR UPDATE` ile kilitler ve tenant-scoped
+    transaction advisory lock ile serileştirir → eşzamanlı iki demotion sıfır owner bırakamaz
+    (mutual-demotion deadlock'u da bu serileştirmeyle önlenir). (g) `suspend`/`remove`, hedefin
+    AKTİF onay sorumluluğu (aktif `approval_role_assignment` VEYA pending/active workflow
+    approval task) varsa 409 ile ENGELLENİR; cross-module kontrol organization domain'inin
+    approval/workflow infrastructure'ını DOĞRUDAN import etmesiyle DEĞİL, composition root'ta
+    wire edilen application READ contract'ı (`ApprovalResponsibilityQuery`) ile yapılır. (h)
+    Değişiklik + version bump + audit AYNI transaction'dadır; optimistic CAS (`version`)
+    stale write → 409; audit başarısızlığı tüm işlemi rollback eder; stale/no-op yolunda audit
+    YAZILMAZ. Listeleme `provider_subject`/`auth_provider`/JWT DÖNMEZ (yalnız email_snapshot,
+    null olabilir); `removed` üyeler durumlarıyla listede KALIR. (i) Frontend bu dilimde YOK
+    (sonraki dilim). E-posta gönderimi ve Supabase ayar değişikliği YOK.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner kararı (2026-07-21): Dilim C kapsamı, iki katmanlı yetki modeli, son-owner
+    invariant'ı, soft-remove terminal semantiği ve approval-sorumluluk guard'ı onaylandı.
+    Governance rolü (membership.role) ile approval rolü (role_key) ayrımı korunur. Additive
+    migration 0009 yazıldı (0001–0008 immutable): `version`/`updated_at` kolonları + backfill,
+    tenant-scoped UPDATE RLS policy, DELETE grant REVOKE, tenant-scoped index'ler.
+  expires_at: 2026-12-01
+  affected_stories: [FP-E03-002]
+  binding_rule: >
+    Bu dilim yalnız membership.role/status yönetir; approval role_key ataması yapılmaz. Yetki
+    merkezi authorization boundary + hedef domain policy'sindedir (route'ta dağınık rol kontrolü
+    yasak). admin yalnız member hedefleri yönetir ve owner veremez; owner kendisi hariç herkesi
+    yönetir. Kullanıcı kendini değiştiremez (409). removed terminaldir; fiziksel DELETE yok
+    (app rolünde DELETE grant yok). Her tenant'ta ≥1 aktif owner kalır (FOR UPDATE + advisory
+    lock). Aktif onay sorumluluğu olan kullanıcı suspend/remove edilemez (409, cross-module READ
+    contract ile). Değişiklik + audit tek transaction; optimistic CAS ile stale → 409; no-op →
+    duplicate (audit yok). Listeleme identity/JWT sızdırmaz.
+  reference: apps/backend/src/flowpilot/modules/organization/application/member_handlers.py
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde
