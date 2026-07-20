@@ -283,6 +283,38 @@ Format:
     DEĞİLDİR; yalnız actor'ın kendi aktif üyeliklerini döndürür.
   reference: apps/backend/migrations/versions/0006_membership_actor_select_policy.py
 
+- id: ASM-0018
+  statement: >
+    Davet çekirdeği (FP-E03-001, Dilim A) owner-approved kararları. (a) Davet süresi
+    SABİT 7 gündür (`expires_at = created_at + 7 gün`). (b) Davetle YALNIZ `admin` veya
+    `member` membership rolü verilebilir; `owner` rolü davet yoluyla VERİLEMEZ (DB CHECK +
+    domain reddi). (c) Davet oluşturma/listeleme/iptal YALNIZ aktif `owner` veya `admin`
+    üyeye açıktır (merkezi authorization boundary; member ve non-member reddedilir). (d)
+    Bu dilim yalnız davet OLUŞTURMA, LİSTELEME ve İPTAL kapsar; davet KABULÜ, üyelik
+    oluşturma ve frontend SONRAKİ dilime (Dilim B) aittir — bu dilimde implemente EDİLMEZ.
+    (e) Ham davet token'ı kriptografik güvenli üretilir (`secrets`), veritabanında YALNIZ
+    SHA-256 hash olarak saklanır, ham değer YALNIZ oluşturma cevabında bir kez döner; audit/
+    outbox/log/exception'a YAZILMAZ. (f) E-posta trim+lowercase normalize edilir. (g)
+    Üye kaldırma ileride soft-remove olacaktır; kendi talebini onaylama yasağı SABİT bir
+    kural olacaktır ve uygun onaycı yoksa blocked/unassigned davranışı uygulanacaktır —
+    her ikisi de bu dilimde DEĞİL, sonraki dilimlerde (Dilim C/E) uygulanır.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner kararı (2026-07-20): Dilim A kapsamı ve güvenlik parametreleri onaylandı.
+    E-posta gönderimi bu dilimde EKLENMEZ; owner tek kullanımlık davet linkini manuel
+    paylaşır (accept_url oluşturma cevabında döner). Ücretli e-posta sağlayıcısı ertelendi.
+  expires_at: 2026-12-01
+  affected_stories: [FP-E03-001]
+  binding_rule: >
+    `owner` rolü davetle atanamaz (DB CHECK + domain). Ham token DB'ye YAZILMAZ; yalnız
+    SHA-256 hash saklanır. Davet yönetimi (create/list/revoke) owner/admin dışına açılamaz;
+    yetki kontrolü merkezi authorization boundary'sindedir, route içinde dağınık rol
+    kontrolü YAZILMAZ. Davet kabulü ve üyelik oluşturma bu dilime EKLENMEZ.
+  reference: apps/backend/src/flowpilot/modules/organization/domain/invitation.py
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde
