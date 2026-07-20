@@ -252,3 +252,48 @@ def test_accept_invalid_body_422(client: TestClient, org: dict[str, object]) -> 
         headers=_bearer("tok-invitee"),
     )
     assert resp2.status_code == 422
+
+
+# ==================== ACCEPT IDEMPOTENCY-KEY =================================
+
+
+def _accept_key(client: TestClient, org_id: object, token: str, who: str, key: str) -> object:
+    return client.post(
+        "/v1/invitations/accept",
+        json={"organization_id": str(org_id), "token": token},
+        headers={**_bearer(who), "Idempotency-Key": key},
+    )
+
+
+def test_accept_same_key_same_payload_duplicate(client: TestClient, org: dict[str, object]) -> None:
+    token = _create_invitation(client, org["id"])
+    first = _accept_key(client, org["id"], token, "tok-invitee", "K-1")
+    second = _accept_key(client, org["id"], token, "tok-invitee", "K-1")
+    assert first.status_code == 200 and first.json()["duplicate"] is False
+    assert second.status_code == 200 and second.json()["duplicate"] is True
+    assert second.json()["membership_id"] == first.json()["membership_id"]
+    # Response'ta iç idempotency verisi yok.
+    assert "request_fingerprint" not in second.json()
+    assert "idempotency_key" not in second.json()
+    assert "token" not in second.json() and "token_hash" not in second.json()
+
+
+def test_accept_same_key_different_token_conflict(
+    client: TestClient, org: dict[str, object]
+) -> None:
+    token = _create_invitation(client, org["id"])
+    first = _accept_key(client, org["id"], token, "tok-invitee", "K-2")
+    conflict = _accept_key(client, org["id"], "another-token-value", "tok-invitee", "K-2")
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+
+
+def test_accept_same_key_different_org_conflict(
+    client: TestClient, org: dict[str, object], app_sessionmaker: sessionmaker[Session]
+) -> None:
+    token = _create_invitation(client, org["id"])
+    _accept_key(client, org["id"], token, "tok-invitee", "K-3")
+    tenant_b, _ = create_tenant_with_owner(app_sessionmaker, owner_subject="owner-b")
+    # Aynı key farklı org → 409 (actor-scoped cross-tenant tespit).
+    conflict = _accept_key(client, tenant_b, token, "tok-invitee", "K-3")
+    assert conflict.status_code == 409

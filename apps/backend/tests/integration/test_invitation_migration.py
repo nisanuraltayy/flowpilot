@@ -128,3 +128,85 @@ def test_downgrade_to_0006_then_upgrade_head(database: DatabaseHandle) -> None:
         ).scalar_one()
     engine.dispose()
     assert restored == 1
+
+
+# ==================== 0008 accept idempotency table =========================
+
+IDEM_TABLE = "organization_invitation_accept_idempotency"
+
+
+def test_idempotency_table_exists_with_rls_forced(app_sessionmaker: sessionmaker[Session]) -> None:
+    with app_sessionmaker() as session:
+        row = session.execute(
+            text(
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname = :t AND relkind = 'r'"
+            ),
+            {"t": IDEM_TABLE},
+        ).one()
+    assert row[0] is True and row[1] is True
+
+
+def test_idempotency_unique_and_index_present(app_sessionmaker: sessionmaker[Session]) -> None:
+    with app_sessionmaker() as session:
+        indexes = {
+            r[0]
+            for r in session.execute(
+                text("SELECT indexname FROM pg_indexes WHERE tablename = :t"), {"t": IDEM_TABLE}
+            ).all()
+        }
+    assert "uq_org_invitation_accept_idem_scope" in indexes
+    assert "ix_org_invitation_accept_idem_actor_key" in indexes
+
+
+def test_idempotency_policies_present(app_sessionmaker: sessionmaker[Session]) -> None:
+    with app_sessionmaker() as session:
+        policies = {
+            r[0]
+            for r in session.execute(
+                text("SELECT policyname FROM pg_policies WHERE tablename = :t"), {"t": IDEM_TABLE}
+            ).all()
+        }
+    assert "p_org_invitation_accept_idem_tenant_select" in policies
+    assert "p_org_invitation_accept_idem_actor_select" in policies
+    assert "p_org_invitation_accept_idem_tenant_insert" in policies
+
+
+def test_idempotency_grants_no_delete(app_sessionmaker: sessionmaker[Session]) -> None:
+    with app_sessionmaker() as session:
+        privileges = {
+            r[0]
+            for r in session.execute(
+                text(
+                    "SELECT privilege_type FROM information_schema.role_table_grants "
+                    "WHERE table_name = :t AND grantee = 'flowpilot_app'"
+                ),
+                {"t": IDEM_TABLE},
+            ).all()
+        }
+    assert {"SELECT", "INSERT"} <= privileges
+    assert "UPDATE" not in privileges and "DELETE" not in privileges
+
+
+def test_downgrade_to_0007_then_upgrade_head(database: DatabaseHandle) -> None:
+    cfg = _alembic_config(database.migrator_url)
+    try:
+        command.downgrade(cfg, "0007")
+        engine = create_engine(database.migrator_url)
+        with engine.connect() as conn:
+            remaining = conn.execute(
+                text("SELECT count(*) FROM information_schema.tables WHERE table_name = :t"),
+                {"t": IDEM_TABLE},
+            ).scalar_one()
+        engine.dispose()
+        assert remaining == 0
+    finally:
+        command.upgrade(cfg, "head")
+    engine = create_engine(database.migrator_url)
+    with engine.connect() as conn:
+        restored = conn.execute(
+            text("SELECT count(*) FROM information_schema.tables WHERE table_name = :t"),
+            {"t": IDEM_TABLE},
+        ).scalar_one()
+    engine.dispose()
+    assert restored == 1

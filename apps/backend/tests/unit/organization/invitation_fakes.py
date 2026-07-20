@@ -14,6 +14,7 @@ from flowpilot.modules.organization.application.invitation_errors import (
     InvitationConcurrencyError,
 )
 from flowpilot.modules.organization.application.invitation_ports import (
+    AcceptIdempotencyRecord,
     InvitationPreviewRow,
     MembershipRecord,
     StoredInvitation,
@@ -215,17 +216,44 @@ class FakeMembershipWriteRepository:
         return self.records.get((tenant_id, user_id))
 
 
+class FakeAcceptIdempotencyRepository:
+    """In-memory davet kabul idempotency deposu (actor-scoped find + unique tenant+actor+key)."""
+
+    def __init__(self, seed: list[AcceptIdempotencyRecord] | None = None) -> None:
+        self.records: list[AcceptIdempotencyRecord] = list(seed) if seed else []
+
+    def find_for_actor(
+        self, *, actor_user_id: UUID, idempotency_key: str
+    ) -> AcceptIdempotencyRecord | None:
+        for record in self.records:
+            if record.actor_user_id == actor_user_id and record.idempotency_key == idempotency_key:
+                return record
+        return None
+
+    def add_if_absent(
+        self, record: AcceptIdempotencyRecord, *, record_id: UUID, now: datetime
+    ) -> bool:
+        scope = (record.tenant_id, record.actor_user_id, record.idempotency_key)
+        for current in self.records:
+            if (current.tenant_id, current.actor_user_id, current.idempotency_key) == scope:
+                return False
+        self.records.append(record)
+        return True
+
+
 class FakeInvitationAcceptUnitOfWork:
-    """invitations + memberships + audit; tek transaction sayaçları."""
+    """invitations + memberships + idempotency + audit; tek transaction sayaçları."""
 
     def __init__(
         self,
         invitations: FakeInvitationRepository,
         memberships: FakeMembershipWriteRepository,
         audit: FakeAuditWriter,
+        idempotency: FakeAcceptIdempotencyRepository | None = None,
     ) -> None:
         self.invitations = invitations
         self.memberships = memberships
+        self.idempotency = idempotency or FakeAcceptIdempotencyRepository()
         self.audit = audit
         self.committed = 0
         self.rolled_back = 0

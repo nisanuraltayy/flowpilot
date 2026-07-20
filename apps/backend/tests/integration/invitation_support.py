@@ -109,6 +109,22 @@ def audit_event_count(
     return int(value)
 
 
+def accept_idempotency_count(app_sessionmaker: sessionmaker[Session], *, tenant_id: UUID) -> int:
+    """Bir tenant scope'undaki davet kabul idempotency kaydı sayısı (tenant context ile)."""
+    with app_sessionmaker() as s, s.begin():
+        s.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": str(tenant_id)}
+        )
+        value = s.execute(
+            text(
+                "SELECT count(*) FROM organization_invitation_accept_idempotency "
+                "WHERE tenant_id = :t"
+            ),
+            {"t": str(tenant_id)},
+        ).scalar_one()
+    return int(value)
+
+
 def build_create_invitation_handler(
     app_sessionmaker: sessionmaker[Session], *, frontend_base_url: str | None = None
 ) -> CreateInvitationHandler:
