@@ -58,13 +58,19 @@ class ApprovalComment:
 
 @dataclass(frozen=True)
 class ApprovalRoleAssignment:
-    """Bir tenant içinde bir role key'e atanmış aktif kullanıcı."""
+    """Bir tenant içinde bir role key'e atanmış aktif kullanıcı.
+
+    `version` optimistic concurrency içindir ve role_key başına AKTİF atamada MONOTONİK
+    ilerler: reassign sırasında yeni active satır `version = önceki_active.version + 1`
+    alır (ilk atama = 1). Böylece eş zamanlı bir stale reassign temiz biçimde reddedilir.
+    """
 
     id: ApprovalRoleAssignmentId
     tenant_id: TenantId
     role_key: ApprovalRoleKey
     assigned_user_id: UserId
     status: ApprovalAssignmentStatus
+    version: int
     created_at: datetime
     updated_at: datetime
 
@@ -77,6 +83,7 @@ class ApprovalRoleAssignment:
         role_key: ApprovalRoleKey,
         assigned_user_id: UserId,
         created_at: datetime,
+        version: int = 1,
     ) -> ApprovalRoleAssignment:
         return cls(
             id=id,
@@ -84,6 +91,7 @@ class ApprovalRoleAssignment:
             role_key=role_key,
             assigned_user_id=assigned_user_id,
             status=ApprovalAssignmentStatus.ACTIVE,
+            version=version,
             created_at=created_at,
             updated_at=created_at,
         )

@@ -33,7 +33,18 @@ _MEMBER_MANAGEMENT: frozenset[Permission] = frozenset(
     }
 )
 
-_OWNER_ADMIN: frozenset[Permission] = _INVITATION_MANAGEMENT | _MEMBER_MANAGEMENT
+# Workflow approval rol atama coarse gate: owner/admin okuyabilir ve değiştirebilir;
+# member yasak. Bu, org-yönetişim rolünden ayrı bir kavramdır (approval role_key).
+_APPROVAL_ROLE_MANAGEMENT: frozenset[Permission] = frozenset(
+    {
+        Permission.APPROVAL_ROLE_ASSIGNMENT_READ,
+        Permission.APPROVAL_ROLE_ASSIGNMENT_CHANGE,
+    }
+)
+
+_OWNER_ADMIN: frozenset[Permission] = (
+    _INVITATION_MANAGEMENT | _MEMBER_MANAGEMENT | _APPROVAL_ROLE_MANAGEMENT
+)
 
 # Merkezi katalog: rol → izin kümesi. Bilinmeyen/eksik rol → boş küme (deny).
 _ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {

@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from flowpilot.api.wiring import (
     SqlAlchemyApprovalDecisionUnitOfWork,
+    SqlAlchemyApprovalRoleAssignmentListReadModel,
+    SqlAlchemyApprovalRoleAssignmentUpdateUnitOfWork,
     SqlAlchemyInvitationAcceptUnitOfWork,
     SqlAlchemyInvitationUnitOfWork,
     SqlAlchemyMemberListReadModel,
@@ -38,6 +40,10 @@ from flowpilot.modules.approval.application.decide_handler import DecideApproval
 from flowpilot.modules.approval.application.ensure_assignments import (
     DefaultApproverResolver,
     EnsureDefaultApprovalRoleAssignments,
+)
+from flowpilot.modules.approval.application.role_assignment_handlers import (
+    AssignApprovalRoleHandler,
+    ListApprovalRoleAssignmentsHandler,
 )
 from flowpilot.modules.approval.infrastructure.persistence.repositories import (
     SqlAlchemyApprovalRoleAssignmentQuery,
@@ -291,6 +297,28 @@ def get_update_member_handler(
 ) -> UpdateOrganizationMemberHandler:
     return UpdateOrganizationMemberHandler(
         unit_of_work_factory=lambda: SqlAlchemyMemberUpdateUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_list_approval_roles_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> ListApprovalRoleAssignmentsHandler:
+    return ListApprovalRoleAssignmentsHandler(
+        list_query=SqlAlchemyApprovalRoleAssignmentListReadModel(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+    )
+
+
+def get_assign_approval_role_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> AssignApprovalRoleHandler:
+    return AssignApprovalRoleHandler(
+        unit_of_work_factory=lambda: SqlAlchemyApprovalRoleAssignmentUpdateUnitOfWork(
+            session_factory
+        ),
         membership_query=SqlAlchemyMembershipQuery(session_factory),
         clock=SystemClock(),
         id_generator=UuidGenerator(),
