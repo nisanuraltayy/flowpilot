@@ -182,6 +182,56 @@ def test_duplicate_pending_invitation_conflicts() -> None:
     assert uow.committed == 0
 
 
+def _seed_expired_pending(email: str, *, created_at: datetime) -> Invitation:
+    # created_at geçmişte → expires_at (created_at + 7g) da _NOW'a göre geçmişte olur.
+    return Invitation.create(
+        id=InvitationId(uuid4()),
+        tenant_id=TenantId(TENANT),
+        invited_email=email,
+        role=MembershipRole.MEMBER,
+        token_hash=hash_invitation_token("OLD-RAW"),
+        invited_by_user_id=UserId(OWNER),
+        created_at=created_at,
+    )
+
+
+def test_non_expired_pending_still_blocks_new_invite() -> None:
+    repo = FakeInvitationRepository(
+        seed=[_seed_expired_pending("keep@example.com", created_at=_NOW)]  # _NOW → expires future
+    )
+    handler, uow = _build_create(repository=repo)
+    with pytest.raises(DuplicatePendingInvitationError):
+        handler.handle(_create_command(OWNER, email="keep@example.com"))
+    assert uow.committed == 0
+    assert len(repo.saved) == 1  # eski davet dokunulmaz
+
+
+def test_expired_pending_does_not_block_and_is_transitioned() -> None:
+    old = _seed_expired_pending("again@example.com", created_at=_NOW - timedelta(days=8))
+    repo = FakeInvitationRepository(seed=[old])
+    audit = FakeAuditWriter()
+    handler, uow = _build_create(repository=repo, audit=audit, tokens=["NEW-RAW"])
+
+    result = handler.handle(_create_command(OWNER, email="again@example.com"))
+
+    assert result.duplicate is False and result.raw_token == "NEW-RAW"
+    assert uow.committed == 1
+    # Eski davet expired oldu; yeni pending eklendi (farklı token hash).
+    assert len(repo.saved) == 2
+    old_row = next(i for i in repo.saved if i.id == old.id)
+    new_row = next(i for i in repo.saved if i.id != old.id)
+    assert old_row.status is InvitationStatus.EXPIRED
+    assert old_row.version == old.version + 1
+    assert new_row.status is InvitationStatus.PENDING
+    assert new_row.token_hash == hash_invitation_token("NEW-RAW")
+    assert new_row.token_hash != old.token_hash
+    # Audit: önce expired, sonra created (ham token yok).
+    events = [r.event_type.value for r in audit.records]
+    assert events == ["organization.invitation.expired", "organization.invitation.created"]
+    assert all("NEW-RAW" not in f"{r.metadata} {r.role_key}" for r in audit.records)
+    assert all("OLD-RAW" not in f"{r.metadata} {r.role_key}" for r in audit.records)
+
+
 def test_only_hash_persisted_never_raw_token() -> None:
     repo = FakeInvitationRepository()
     handler, _ = _build_create(repository=repo, tokens=["super-secret-raw"])

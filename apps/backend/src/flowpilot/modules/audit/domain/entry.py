@@ -26,6 +26,7 @@ class AuditEventType(StrEnum):
     WORKFLOW_REJECTED = "workflow.rejected"
     ORGANIZATION_INVITATION_CREATED = "organization.invitation.created"
     ORGANIZATION_INVITATION_REVOKED = "organization.invitation.revoked"
+    ORGANIZATION_INVITATION_EXPIRED = "organization.invitation.expired"
 
 
 @dataclass(frozen=True, slots=True)

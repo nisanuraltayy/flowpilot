@@ -64,6 +64,18 @@ def test_constraints_and_indexes_present(app_sessionmaker: sessionmaker[Session]
     assert "uq_organization_invitations_idempotency" in indexes
 
 
+def test_status_check_accepts_expired(app_sessionmaker: sessionmaker[Session]) -> None:
+    with app_sessionmaker() as session:
+        definition = session.execute(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'ck_organization_invitations_status_valid'"
+            )
+        ).scalar_one()
+    for value in ("pending", "accepted", "revoked", "expired"):
+        assert value in definition, f"status CHECK '{value}' değerini kabul etmiyor"
+
+
 def test_rls_policies_present(app_sessionmaker: sessionmaker[Session]) -> None:
     with app_sessionmaker() as session:
         policies = {

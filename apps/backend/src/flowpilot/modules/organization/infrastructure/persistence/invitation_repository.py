@@ -7,7 +7,6 @@ GELMEZ — yalnız `token_hash` yazılır.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -111,15 +110,14 @@ class SqlAlchemyInvitationRepository:
         ).first()
         return _row_to_invitation(row) if row is not None else None
 
-    def find_active_pending_by_email(
-        self, *, tenant_id: UUID, invited_email: str, now: datetime
-    ) -> Invitation | None:
+    def find_pending_by_email(self, *, tenant_id: UUID, invited_email: str) -> Invitation | None:
+        # SÜRE FİLTRESİ YOK: süresi geçmiş pending de döner (expiry use-case'te belirlenir).
+        # Partial unique (status='pending') gereği en fazla bir satır olur.
         row = self._session.execute(
             select(invitations_table).where(
                 invitations_table.c.tenant_id == tenant_id,
                 invitations_table.c.invited_email == invited_email,
                 invitations_table.c.status == InvitationStatus.PENDING.value,
-                invitations_table.c.expires_at > now,
             )
         ).first()
         return _row_to_invitation(row) if row is not None else None

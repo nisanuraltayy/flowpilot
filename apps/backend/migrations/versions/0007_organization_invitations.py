@@ -10,9 +10,11 @@ kalır, dokunulmaz.
 Tek tablo: organization_invitations (organization module-owned).
 - `token_hash` YALNIZ SHA-256 hash saklar; ham token ASLA persist edilmez.
 - `role` DB CHECK ile 'admin'/'member' ile sınırlıdır — `owner` davetle VERİLEMEZ (ASM-0018).
-- `status` ∈ ('pending','accepted','revoked'); `accepted` şema düzeyinde bugünden hazırdır
-  ama KABUL AKIŞI bu dilimde YOK (Dilim B).
+- `status` ∈ ('pending','accepted','revoked','expired'); `accepted` şema düzeyinde bugünden
+  hazırdır ama KABUL AKIŞI bu dilimde YOK (Dilim B). `expired`, süresi geçmiş bekleyen
+  davetin yeniden davete engel olmaması için lazy transition ile kullanılır (owner kararı).
 - Duplicate ön-kontrol: (tenant_id, invited_email) için `status='pending'` partial unique.
+  Süresi geçmiş davet `expired`'a geçince partial unique'ten DÜŞER → yeni davet engellenmez.
 - Idempotency: (tenant_id, idempotency_key) partial unique (idempotency_key NOT NULL).
 - token lookup için (tenant_id, token_hash) unique index (Dilim B kabul akışına hazır).
 - Cross-module identity FK YOKTUR (ASM-0012); tenant FK organization_tenants'a bağlıdır.
@@ -62,7 +64,7 @@ def upgrade() -> None:
             "role IN ('admin','member')", name="ck_organization_invitations_role_valid"
         ),
         sa.CheckConstraint(
-            "status IN ('pending','accepted','revoked')",
+            "status IN ('pending','accepted','revoked','expired')",
             name="ck_organization_invitations_status_valid",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_organization_invitations"),

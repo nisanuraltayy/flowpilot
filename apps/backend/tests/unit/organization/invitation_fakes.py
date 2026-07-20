@@ -109,15 +109,13 @@ class FakeInvitationRepository:
                 return current
         return None
 
-    def find_active_pending_by_email(
-        self, *, tenant_id: UUID, invited_email: str, now: datetime
-    ) -> Invitation | None:
+    def find_pending_by_email(self, *, tenant_id: UUID, invited_email: str) -> Invitation | None:
+        # SÜRE FİLTRESİ YOK (gerçek repo ile aynı): süresi geçmiş pending de döner.
         for current in self.saved:
             if (
                 current.tenant_id.value == tenant_id
                 and current.invited_email == invited_email
                 and current.status is InvitationStatus.PENDING
-                and not current.is_expired(now)
             ):
                 return current
         return None

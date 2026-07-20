@@ -43,10 +43,13 @@ class InvitationRepository(Protocol):
 
     def find_by_id(self, *, tenant_id: UUID, invitation_id: UUID) -> Invitation | None: ...
 
-    def find_active_pending_by_email(
-        self, *, tenant_id: UUID, invited_email: str, now: datetime
-    ) -> Invitation | None:
-        """Aktif (pending + süresi dolmamış) davet varsa döner (duplicate ön-kontrol)."""
+    def find_pending_by_email(self, *, tenant_id: UUID, invited_email: str) -> Invitation | None:
+        """`status='pending'` davet varsa döner (SÜRE FİLTRESİ YOK).
+
+        Süresi dolmuş olup olmadığı use-case'te `is_expired(now)` ile belirlenir:
+        süresi geçmişse expired'a geçirilip yeniden davete izin verilir. Partial unique
+        (status='pending') gereği en fazla bir satır döner.
+        """
         ...
 
     def find_by_idempotency_key(

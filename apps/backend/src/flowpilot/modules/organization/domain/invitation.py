@@ -40,6 +40,13 @@ class InvitationStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"  # Dilim B; şema/state makinesi bugünden destekler
     REVOKED = "revoked"
+    EXPIRED = "expired"
+
+
+# Yeni davet oluşturmayı ENGELLEMEYEN terminal durumlar (aktif bekleyen değil).
+_TERMINAL_STATUSES = frozenset(
+    {InvitationStatus.ACCEPTED, InvitationStatus.REVOKED, InvitationStatus.EXPIRED}
+)
 
 
 class InvalidInvitedEmailError(DomainError):
@@ -137,12 +144,22 @@ class Invitation:
         """Davetin süresi dolmuş mu? (expires_at dahil sınır)."""
         return now >= self.expires_at
 
-    def revoke(self, *, now: datetime) -> Invitation:
-        """`pending → revoked` geçişi. `accepted` ise terminal hatası verir.
+    def expire(self, *, now: datetime) -> Invitation:
+        """`pending → expired` geçişi (süresi geçmiş bekleyen davet).
 
-        Idempotency (zaten revoked) use-case'te ele alınır; burada terminal koruması.
-        `version` DEĞİŞMEZ — optimistic CAS beklenen sürüm olarak repo tarafından kullanılır.
+        Yalnız `pending` durumdan çağrılır (repo yalnız pending döndürür). `version`
+        DEĞİŞMEZ — optimistic CAS beklenen sürüm olarak repo tarafından kullanılır.
         """
-        if self.status is InvitationStatus.ACCEPTED:
-            raise InvitationNotRevocableError("kabul edilmis davet iptal edilemez")
+        if self.status is not InvitationStatus.PENDING:
+            raise InvitationNotRevocableError("yalnız bekleyen davet expired olabilir")
+        return replace(self, status=InvitationStatus.EXPIRED, updated_at=now)
+
+    def revoke(self, *, now: datetime) -> Invitation:
+        """`pending → revoked` geçişi. Terminal (accepted/revoked/expired) → hata verir.
+
+        Idempotency (zaten revoked/expired) use-case'te ele alınır; burada terminal
+        koruması (defense-in-depth). `version` DEĞİŞMEZ — optimistic CAS için repo kullanır.
+        """
+        if self.status in _TERMINAL_STATUSES:
+            raise InvitationNotRevocableError("terminal davet iptal edilemez")
         return replace(self, status=InvitationStatus.REVOKED, updated_at=now)

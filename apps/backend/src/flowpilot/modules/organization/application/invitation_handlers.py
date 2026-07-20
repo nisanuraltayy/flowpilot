@@ -131,12 +131,26 @@ class CreateInvitationHandler:
             if self._email_matches_active_member(command.tenant_id, email):
                 raise AlreadyActiveMemberError("e-posta zaten aktif üye")
 
-            # 5) Aktif bekleyen davet var mı? (ön-kontrol; DB partial unique backstop).
-            existing = uow.invitations.find_active_pending_by_email(
-                tenant_id=command.tenant_id, invited_email=email, now=now
+            # 5) Bekleyen davet var mı? (süre filtresi YOK — expiry burada belirlenir).
+            #    - Süresi geçmemişse → gerçek duplicate → 409.
+            #    - Süresi geçmişse → eski daveti expired'a geçir (aynı tx), sonra yeniden davet.
+            #      Optimistic CAS eşzamanlı iki yeniden davetten yalnız birinin geçmesini sağlar.
+            existing = uow.invitations.find_pending_by_email(
+                tenant_id=command.tenant_id, invited_email=email
             )
             if existing is not None:
-                raise DuplicatePendingInvitationError("bu e-posta için zaten bekleyen davet var")
+                if not existing.is_expired(now):
+                    raise DuplicatePendingInvitationError(
+                        "bu e-posta için zaten bekleyen davet var"
+                    )
+                expired = existing.expire(now=now)
+                uow.invitations.update_checked(expired, expected_version=existing.version)
+                self._append_audit(
+                    uow,
+                    event_type=AuditEventType.ORGANIZATION_INVITATION_EXPIRED,
+                    invitation=expired,
+                    actor_user_id=command.actor_user_id,
+                )
 
             # 6) Güvenli token üret → yalnız hash sakla.
             raw_token = self._tokens.new_raw_token()
@@ -283,8 +297,9 @@ class RevokeInvitationHandler:
             if invitation is None:
                 raise InvitationNotFoundError("davet bulunamadı")
 
-            # Idempotent: zaten revoked → yeni yazım YOK, audit YOK.
-            if invitation.status is InvitationStatus.REVOKED:
+            # Idempotent terminal: zaten revoked VEYA expired → yeni yazım YOK, audit YOK.
+            # expired kaydı revoked'a DÖNÜŞTÜRÜLMEZ (terminal kabul edilir).
+            if invitation.status in (InvitationStatus.REVOKED, InvitationStatus.EXPIRED):
                 uow.rollback()
                 return RevokeInvitationResult(
                     invitation_id=invitation.id.value,

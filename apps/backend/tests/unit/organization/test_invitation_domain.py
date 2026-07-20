@@ -156,3 +156,28 @@ def test_revoke_accepted_raises() -> None:
     accepted = replace(_pending(), status=InvitationStatus.ACCEPTED)
     with pytest.raises(InvitationNotRevocableError):
         accepted.revoke(now=_NOW)
+
+
+def test_revoke_expired_raises_terminal() -> None:
+    from dataclasses import replace
+
+    expired = replace(_pending(), status=InvitationStatus.EXPIRED)
+    with pytest.raises(InvitationNotRevocableError):
+        expired.revoke(now=_NOW)
+
+
+def test_expire_pending_becomes_expired() -> None:
+    invitation = _pending()
+    later = invitation.expires_at + timedelta(hours=1)
+    expired = invitation.expire(now=later)
+    assert expired.status is InvitationStatus.EXPIRED
+    assert expired.updated_at == later
+    assert expired.version == invitation.version  # CAS beklenen sürüm; repo artırır
+
+
+def test_expire_non_pending_raises() -> None:
+    from dataclasses import replace
+
+    revoked = replace(_pending(), status=InvitationStatus.REVOKED)
+    with pytest.raises(InvitationNotRevocableError):
+        revoked.expire(now=_NOW)

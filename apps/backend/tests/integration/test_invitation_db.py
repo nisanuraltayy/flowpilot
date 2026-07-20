@@ -6,6 +6,7 @@ flowpilot_app (NOBYPASSRLS) rolüyle: davet yazımı/okuması gerçek RLS policy
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,7 +14,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from flowpilot.api.wiring import SqlAlchemyInvitationUnitOfWork
+from flowpilot.modules.organization.application.invitation_dto import (
+    CreateInvitationCommand,
+    CreateInvitationResult,
+)
 from flowpilot.modules.organization.application.invitation_errors import (
+    DuplicatePendingInvitationError,
     InvitationConcurrencyError,
 )
 from flowpilot.modules.organization.domain.invitation import Invitation, InvitationStatus
@@ -27,7 +33,11 @@ from flowpilot.modules.organization.infrastructure.persistence.invitation_reposi
 )
 from flowpilot.shared.clock import SystemClock
 from flowpilot.shared.identifiers import InvitationId, TenantId, UserId
-from tests.integration.invitation_support import create_tenant_with_owner
+from tests.integration.invitation_support import (
+    build_create_invitation_handler,
+    create_tenant_with_owner,
+    force_past_expiry,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -156,3 +166,37 @@ def test_stale_version_update_conflicts(app_sessionmaker: sessionmaker[Session])
         uow.set_tenant_context(tenant_a)
         with pytest.raises(InvitationConcurrencyError):
             uow.invitations.update_checked(revoked, expected_version=invitation.version + 5)
+
+
+def test_concurrent_reinvite_single_winner(app_sessionmaker: sessionmaker[Session]) -> None:
+    tenant_id, owner_id = create_tenant_with_owner(app_sessionmaker, owner_subject="s-race")
+    handler = build_create_invitation_handler(app_sessionmaker)
+    email = "race@example.com"
+
+    first = handler.handle(
+        CreateInvitationCommand(
+            tenant_id=tenant_id, actor_user_id=owner_id, invited_email=email, role="member"
+        )
+    )
+    force_past_expiry(app_sessionmaker, tenant_id=tenant_id, invitation_id=first.invitation_id)
+
+    def attempt(_: int) -> object:
+        try:
+            return handler.handle(
+                CreateInvitationCommand(
+                    tenant_id=tenant_id, actor_user_id=owner_id, invited_email=email, role="member"
+                )
+            )
+        except (InvitationConcurrencyError, DuplicatePendingInvitationError) as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(attempt, range(2)))
+
+    winners = [o for o in outcomes if isinstance(o, CreateInvitationResult) and not o.duplicate]
+    assert len(winners) == 1, f"tam olarak bir kazanan bekleniyordu: {outcomes}"
+    # Sonuçta AYNI e-posta için tam olarak BİR bekleyen davet kalır (partial unique + CAS).
+    pending = SqlAlchemyInvitationQuery(app_sessionmaker).list_pending(
+        tenant_id=tenant_id, now=SystemClock().now(), limit=50
+    )
+    assert len([p for p in pending if p.invited_email == email]) == 1

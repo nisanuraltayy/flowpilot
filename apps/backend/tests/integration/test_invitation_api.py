@@ -20,6 +20,7 @@ from flowpilot.config.settings import Settings
 from tests.integration.invitation_support import (
     add_member,
     create_tenant_with_owner,
+    force_past_expiry,
     identity_for,
     invitation_rows,
 )
@@ -280,3 +281,107 @@ def test_rls_default_deny_without_tenant_context(
     with app_sessionmaker() as s, s.begin():
         count = s.execute(text("SELECT count(*) FROM organization_invitations")).scalar_one()
     assert count == 0
+
+
+# --- expiry / reinvitation ---------------------------------------------------
+
+
+def test_expired_pending_allows_reinvite_and_transitions_old(
+    client: TestClient, tenant: dict[str, object], app_sessionmaker: sessionmaker[Session]
+) -> None:
+    email = "again@example.com"
+    first_id = _create_invitation(client, tenant["id"], email=email)
+    first_hash = invitation_rows(app_sessionmaker, tenant["id"])[0]["token_hash"]  # type: ignore[arg-type]
+
+    force_past_expiry(app_sessionmaker, tenant_id=tenant["id"], invitation_id=first_id)  # type: ignore[arg-type]
+
+    # Süresi geçmiş bekleyen davet yeni daveti ENGELLEMEZ → 201, yeni token.
+    second = client.post(
+        _invites_url(tenant["id"]),
+        json={"email": f"  {email.upper()} ", "role": "member"},  # normalize aynı e-posta
+        headers=_auth_headers("owner"),
+    )
+    assert second.status_code == 201, second.text
+    second_id = second.json()["invitation_id"]
+    assert second_id != first_id
+    assert second.json()["token"]
+
+    rows = {str(r["id"]): r for r in invitation_rows(app_sessionmaker, tenant["id"])}  # type: ignore[arg-type]
+    assert rows[first_id]["status"] == "expired"  # eski davet expired oldu
+    assert rows[second_id]["status"] == "pending"
+    assert rows[second_id]["token_hash"] != first_hash  # farklı token hash
+
+    # Audit: expired + (2x created). En az bir expired event yazıldı.
+    with app_sessionmaker() as s, s.begin():
+        s.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": str(tenant["id"])}
+        )
+        expired_events = s.execute(
+            text(
+                "SELECT count(*) FROM audit_entries WHERE aggregate_id = :i "
+                "AND event_type = 'organization.invitation.expired'"
+            ),
+            {"i": first_id},
+        ).scalar_one()
+    assert expired_events == 1
+
+
+def test_non_expired_pending_still_conflicts(client: TestClient, tenant: dict[str, object]) -> None:
+    _create_invitation(client, tenant["id"], email="fresh@example.com")
+    second = client.post(
+        _invites_url(tenant["id"]),
+        json={"email": "fresh@example.com", "role": "member"},
+        headers=_auth_headers("owner"),
+    )
+    assert second.status_code == 409  # süresi geçmemiş → hâlâ duplicate
+
+
+def test_list_excludes_expired_and_past_expiry(
+    client: TestClient, tenant: dict[str, object], app_sessionmaker: sessionmaker[Session]
+) -> None:
+    invitation_id = _create_invitation(client, tenant["id"], email="ghost@example.com")
+    force_past_expiry(app_sessionmaker, tenant_id=tenant["id"], invitation_id=invitation_id)  # type: ignore[arg-type]
+    # status hâlâ 'pending' ama expires_at geçmişte → liste GÖSTERMEZ.
+    response = client.get(_invites_url(tenant["id"]), headers=_auth_headers("owner"))
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+
+
+def test_revoke_expired_is_terminal_and_not_rewritten(
+    client: TestClient, tenant: dict[str, object], app_sessionmaker: sessionmaker[Session]
+) -> None:
+    email = "term@example.com"
+    first_id = _create_invitation(client, tenant["id"], email=email)
+    force_past_expiry(app_sessionmaker, tenant_id=tenant["id"], invitation_id=first_id)  # type: ignore[arg-type]
+    # Reinvite eski daveti 'expired'a geçirir.
+    client.post(
+        _invites_url(tenant["id"]),
+        json={"email": email, "role": "member"},
+        headers=_auth_headers("owner"),
+    )
+    # Expired daveti revoke → terminal/idempotent (revoked'a DÖNÜŞMEZ).
+    url = f"{_invites_url(tenant['id'])}/{first_id}/revoke"
+    response = client.post(url, headers=_auth_headers("owner"))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["duplicate"] is True
+    assert body["status"] == "expired"  # revoked'a çevrilmedi
+
+
+def test_cross_tenant_expiry_does_not_affect_other_tenant(
+    client: TestClient, tenant: dict[str, object], app_sessionmaker: sessionmaker[Session]
+) -> None:
+    email = "shared@example.com"
+    # Tenant A: davet oluştur + süresini geçir.
+    a_id = _create_invitation(client, tenant["id"], email=email)
+    force_past_expiry(app_sessionmaker, tenant_id=tenant["id"], invitation_id=a_id)  # type: ignore[arg-type]
+    # Tenant B: AYNI e-posta için ilk davet — A'nın durumu B'yi etkilemez.
+    tenant_b, _ = create_tenant_with_owner(app_sessionmaker, owner_subject="owner_b")
+    response = client.post(
+        _invites_url(tenant_b),
+        json={"email": email, "role": "member"},
+        headers=_auth_headers("owner_b"),
+    )
+    assert response.status_code == 201  # B'de temiz oluşturma (A etkilemez)
+    b_rows = invitation_rows(app_sessionmaker, tenant_b)
+    assert len(b_rows) == 1 and b_rows[0]["status"] == "pending"

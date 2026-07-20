@@ -139,6 +139,7 @@ def create_invitation(
         AlreadyActiveMemberError,
         DuplicatePendingInvitationError,
         IdempotencyKeyReuseError,
+        InvitationConcurrencyError,
     ) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
