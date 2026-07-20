@@ -25,11 +25,19 @@ from flowpilot.modules.organization.application.invitation_ports import (
     InvitationRepository,
     MembershipWriteRepository,
 )
+from flowpilot.modules.organization.application.member_dto import MemberView
+from flowpilot.modules.organization.application.member_ports import (
+    ApprovalResponsibilityQuery,
+    MembershipManagementRepository,
+)
 from flowpilot.modules.organization.infrastructure.persistence.accept_idempotency_repository import (  # noqa: E501
     SqlAlchemyAcceptIdempotencyRepository,
 )
 from flowpilot.modules.organization.infrastructure.persistence.invitation_repository import (
     SqlAlchemyInvitationRepository,
+)
+from flowpilot.modules.organization.infrastructure.persistence.membership_management_repository import (  # noqa: E501
+    SqlAlchemyMembershipManagementRepository,
 )
 from flowpilot.modules.organization.infrastructure.persistence.membership_repository import (
     SqlAlchemyMembershipWriteRepository,
@@ -273,3 +281,134 @@ class SqlAlchemyTaskInboxReadModel:
             )
             for row in rows
         ]
+
+
+class SqlAlchemyMemberListReadModel:
+    """`MemberListQuery` — organization_memberships + identity_users (email) cross-module JOIN.
+
+    Cross-module read yalnız composition root'ta. Tenant-scoped (RLS); YALNIZ email_snapshot
+    döner (provider_subject / auth_provider DÖNMEZ). Removed üyeler durumlarıyla listede kalır.
+    """
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def list_members(self, *, tenant_id: UUID, limit: int) -> list[MemberView]:
+        with self._session_factory() as session, session.begin():
+            session.execute(
+                text("SELECT set_config('app.current_tenant_id', :v, true)"),
+                {"v": str(tenant_id)},
+            )
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT m.id AS membership_id, m.user_id, u.email_snapshot AS email, "
+                        "m.role, m.status, m.version, m.created_at, m.updated_at "
+                        "FROM organization_memberships m "
+                        "LEFT JOIN identity_users u ON u.id = m.user_id "
+                        "WHERE m.tenant_id = :t "
+                        "ORDER BY m.created_at ASC, m.id ASC LIMIT :limit"
+                    ),
+                    {"t": str(tenant_id), "limit": limit},
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            MemberView(
+                membership_id=row["membership_id"],
+                user_id=row["user_id"],
+                email=row["email"],
+                role=str(row["role"]),
+                status=str(row["status"]),
+                version=int(row["version"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+
+class SqlAlchemyApprovalResponsibilityReader:
+    """`ApprovalResponsibilityQuery` — approval_role_assignments + workflow_runtime_tasks READ.
+
+    Cross-module read yalnız composition root'ta; update UoW'nin session'ında (tenant context
+    set edilmiş) çalışır. Aktif role assignment VEYA pending/active approval task = sorumluluk.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def has_active_responsibilities(self, *, tenant_id: UUID, user_id: UUID) -> bool:
+        value = self._session.execute(
+            text(
+                "SELECT "
+                "EXISTS(SELECT 1 FROM approval_role_assignments "
+                "  WHERE tenant_id = :t AND assigned_user_id = :u AND status = 'active') "
+                "OR EXISTS(SELECT 1 FROM workflow_runtime_tasks "
+                "  WHERE tenant_id = :t AND assigned_user_id = :u "
+                "  AND status IN ('pending','active'))"
+            ),
+            {"t": str(tenant_id), "u": str(user_id)},
+        ).scalar_one()
+        return bool(value)
+
+
+class SqlAlchemyMemberUpdateUnitOfWork:
+    """membership yönetimi + approval sorumluluk + audit — TEK session, TEK transaction.
+
+    Cross-module compose (organization + approval/workflow read + audit) yalnız composition
+    root'ta (ADR-009 §2b). RLS context transaction-local set_config ile taşınır.
+    """
+
+    memberships: MembershipManagementRepository
+    approval_responsibility: ApprovalResponsibilityQuery
+    audit: AuditWriterPort
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+        self._session: Session | None = None
+
+    def __enter__(self) -> SqlAlchemyMemberUpdateUnitOfWork:
+        self._session = self._session_factory()
+        self.memberships = SqlAlchemyMembershipManagementRepository(self._session)
+        self.approval_responsibility = SqlAlchemyApprovalResponsibilityReader(self._session)
+        self.audit = SqlAlchemyAuditWriter(self._session)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        session = self._require_session()
+        try:
+            if exc_type is not None:
+                session.rollback()
+        finally:
+            session.close()
+            self._session = None
+
+    def set_actor_context(self, actor_user_id: UUID) -> None:
+        self._require_session().execute(
+            text("SELECT set_config('app.current_actor_id', :value, true)"),
+            {"value": str(actor_user_id)},
+        )
+
+    def set_tenant_context(self, tenant_id: UUID) -> None:
+        self._require_session().execute(
+            text("SELECT set_config('app.current_tenant_id', :value, true)"),
+            {"value": str(tenant_id)},
+        )
+
+    def commit(self) -> None:
+        self._require_session().commit()
+
+    def rollback(self) -> None:
+        self._require_session().rollback()
+
+    def _require_session(self) -> Session:
+        if self._session is None:
+            raise RuntimeError("UnitOfWork aktif degil — 'with uow:' blogu icinde kullanin.")
+        return self._session

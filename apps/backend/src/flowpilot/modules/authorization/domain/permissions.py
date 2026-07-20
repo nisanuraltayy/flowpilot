@@ -15,3 +15,8 @@ class Permission(StrEnum):
     ORGANIZATION_INVITATION_CREATE = "organization.invitation.create"
     ORGANIZATION_INVITATION_READ = "organization.invitation.read"
     ORGANIZATION_INVITATION_REVOKE = "organization.invitation.revoke"
+    ORGANIZATION_MEMBER_READ = "organization.member.read"
+    ORGANIZATION_MEMBER_ROLE_CHANGE = "organization.member.role.change"
+    ORGANIZATION_MEMBER_SUSPEND = "organization.member.suspend"
+    ORGANIZATION_MEMBER_REACTIVATE = "organization.member.reactivate"
+    ORGANIZATION_MEMBER_REMOVE = "organization.member.remove"
