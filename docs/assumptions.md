@@ -409,6 +409,62 @@ Format:
     duplicate (audit yok). Listeleme identity/JWT sızdırmaz.
   reference: apps/backend/src/flowpilot/modules/organization/application/member_handlers.py
 
+- id: ASM-0021
+  statement: >
+    Gerçek kullanıcılara onay rolü atama (FP-E10-004, Dilim) owner-approved semantikleri.
+    (a) Governance rolleri (owner/admin/member = organization_memberships.role) ile workflow
+    approval rolleri (team_manager/finance/general_manager = approval_role_assignments.role_key)
+    AYRIDIR ve BİRLEŞTİRİLMEZ; bir kullanıcı governance'ta member iken approval'da finance
+    olabilir ve aynı kullanıcı birden fazla approval role taşıyabilir. (b) owner/admin approval
+    rollerini listeler ve değiştirir (merkezi permission: approval.role_assignment.read/change);
+    member 403; non-member/cross-tenant 404 (varlık sızdırmaz). Route'ta dağınık rol kontrolü
+    YOK. (c) Bir approval role YALNIZ aynı organizasyonda AKTİF üyeliği olan bir kullanıcıya
+    atanabilir; suspended/removed üye, başka tenant üyesi veya bulunmayan kullanıcı atanamaz
+    (aktif değil → 409, üye değil → 404). Bu dilimde kullanıcının kendine approval role vermesi
+    YASAK DEĞİLDİR (self-approval engeli SONRAKİ dilim). (d) Atama değişikliği tarihçe koruyan
+    modeldir: eski aktif atama `revoked` yapılır (version+1, updated_at), yeni aktif atama satırı
+    (yeni version) eklenir; fiziksel DELETE YOK (app rolünde DELETE grant yok, migration 0010).
+    Aynı tenant+role_key için DAİMA tek aktif atama (partial unique). No-op (aynı kullanıcı) →
+    duplicate=true, yeni atama/version/audit YOK. (e) version optimistic CAS: role_key başına
+    aktif atamada MONOTONİK ilerler; mevcut aktif atama varsa expected_version zorunludur (yoksa
+    422) ve eşleşmezse 409; aktif atama yoksa create (expected_version opsiyonel). Tenant+role
+    advisory xact lock + FOR UPDATE + partial unique ile eşzamanlı iki farklı-user atamada YALNIZ
+    biri kazanır, diğeri 409 (çift aktif atama/çift audit oluşmaz). (f) Değişiklik + version +
+    audit AYNI transaction (`approval.role_assignment.changed`; metadata: role_key, previous/new
+    assignment_id + user_id, actor, previous/new version — token/JWT/hassas identity YOK); audit
+    başarısızlığı rollback; no-op/stale audit YAZMAZ. (g) MEVCUT workflow task pinning DEĞİŞMEZ:
+    task oluşturulduğu anki assignee'ye pinlenir (assigned_user_id snapshot); reassignment mevcut
+    active/pending task'ları veya geçmiş karar kayıtlarını DEĞİŞTİRMEZ — yalnız SONRAKİ satın alma
+    talepleri yeni atamayı kullanır. Açık task'ların toplu yeniden atanması kapsam DIŞI. Inbox
+    yalnız pinlenmiş assigned_user_id'ye görev gösterir. (h) EnsureDefaultApprovalRoleAssignments
+    güvenli varsayılan olarak kalır: eksik/ilk kurulumda owner seed eder ama MEVCUT aktif atamayı
+    EZMEZ (ON CONFLICT DO NOTHING); reassignment sonrası yeni talepler yeni kullanıcıyı kullanır.
+    (i) Listeleme provider_subject/auth_provider/JWT DÖNMEZ (yalnız email_snapshot, null olabilir),
+    deterministik sırada (team_manager → finance → general_manager). (j) Frontend approval-role
+    yönetimi ve self-approval engeli bu dilimde YOK (sonraki dilim/ler).
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner kararı (2026-07-21): Dilim kapsamı, governance/approval rol ayrımı, aktif-üye atama
+    kuralı, tarihçe koruyan reassignment, optimistic concurrency ve task pinning snapshot davranışı
+    onaylandı. Additive migration 0010 yazıldı (0001–0009 immutable): version kolonu + backfill,
+    tenant-scoped index'ler, DELETE grant REVOKE; mevcut FOR-ALL RLS policy UPDATE'i kapsar ve
+    partial unique active constraint korunur.
+  expires_at: 2026-12-01
+  affected_stories: [FP-E10-004]
+  binding_rule: >
+    Governance rolü ile approval role_key ayrı tutulur; bir kullanıcı birden fazla approval role
+    taşıyabilir. owner/admin approval rol atar (merkezi permission; route'ta dağınık rol kontrolü
+    yasak); yalnız aktif üye atanabilir (suspended/removed/non-member/cross-tenant reddedilir).
+    Reassignment eski atamayı revoked yapar + yeni aktif atama ekler (fiziksel DELETE yok; tek
+    aktif atama partial unique ile). version optimistic CAS + tenant+role advisory lock: eşzamanlı
+    atamada tek kazanan, diğeri 409; no-op → duplicate (audit yok). Mevcut workflow task'lar
+    pinlenmiş assignee'de kalır; yalnız sonraki talepler yeni atamayı kullanır. Owner seed mevcut
+    gerçek atamayı ezmez. Self-approval engeli ve frontend sonraki dilimdedir.
+  reference: apps/backend/src/flowpilot/modules/approval/application/role_assignment_handlers.py
+
 - id: ASM-0006
   statement: >
     Dosya eki için S3-compatible storage portu MVP'de MinIO (local development) üzerinde
