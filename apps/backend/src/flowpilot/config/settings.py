@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     log_level: LogLevel = "info"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
+    # Frontend public base URL — davet kabul linki (accept_url) bundan üretilir.
+    # HARD-CODE EDİLMEZ; env'den gelir. Yoksa relative path (host'suz) üretilir —
+    # sahte localhost/tunnel adresi yazılmaz.
+    frontend_base_url: str | None = None
 
     # --- Database (Optional — import/secret zorunluluğu yok) ---
     # Uygulama bağlantısı: BYPASSRLS'siz `flowpilot_app` rolü (ADR-006).

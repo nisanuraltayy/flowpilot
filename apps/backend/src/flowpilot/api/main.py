@@ -14,7 +14,14 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from flowpilot.api.routes import health, me, organizations, purchase_requests, tasks
+from flowpilot.api.routes import (
+    health,
+    invitations,
+    me,
+    organizations,
+    purchase_requests,
+    tasks,
+)
 from flowpilot.config.settings import Settings, get_settings
 
 _STRICT_CONFIG_ENVIRONMENTS = ("staging", "production")
@@ -59,6 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(organizations.router)
     app.include_router(me.router)
+    app.include_router(invitations.router)
     app.include_router(purchase_requests.router)
     app.include_router(tasks.router)
 

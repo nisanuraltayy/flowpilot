@@ -131,6 +131,7 @@ _TRUNCATE_TABLES = (
     "workflow_runtime_instances",
     "workflow_runtime_definition_versions",
     "workflow_runtime_definitions",
+    "organization_invitations",
     "organization_memberships",
     "organization_tenants",
     "identity_users",
