@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
+import { isOrgManagerRole } from "@/features/organizations/roles";
 import { createPurchaseRequestAction } from "@/features/purchase-requests/actions";
 import { PurchaseRequestForm } from "@/features/purchase-requests/purchase-request-form";
 
@@ -23,7 +24,12 @@ export default async function NewPurchaseRequestPage() {
   const userEmail = await getUserEmail();
 
   return (
-    <AppShell userEmail={userEmail} organizationName={context.organization.name} activeNav="new">
+    <AppShell
+      userEmail={userEmail}
+      organizationName={context.organization.name}
+      activeNav="new"
+      canManage={isOrgManagerRole(context.organization.membershipKind)}
+    >
       <PageHeader
         title="Yeni satın alma talebi"
         description="Talep, tutara göre doğru onay zincirine otomatik yönlendirilir."

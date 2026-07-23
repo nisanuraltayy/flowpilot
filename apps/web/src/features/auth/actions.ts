@@ -19,6 +19,7 @@ import {
 } from "@/features/auth/action-result";
 import { signInSchema, signUpSchema } from "@/features/auth/schemas";
 import { getAppUrl } from "@/lib/env";
+import { sanitizeInternalPath } from "@/lib/redirect";
 import { createClient } from "@/lib/supabase/server";
 
 const GENERIC_SIGNIN_ERROR = "E-posta veya şifre hatalı.";
@@ -61,7 +62,10 @@ export async function signInAction(
     return errorResult(GENERIC_SIGNIN_ERROR);
   }
 
-  redirect("/dashboard");
+  // Dönüş yolu YALNIZ uygulama içi relative path olabilir (open-redirect koruması);
+  // davet kabul akışı için `next` korunur, aksi hâlde dashboard'a gidilir.
+  const next = formData.get("next");
+  redirect(sanitizeInternalPath(typeof next === "string" ? next : null, "/dashboard"));
 }
 
 export async function signUpAction(

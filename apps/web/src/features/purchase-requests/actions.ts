@@ -104,8 +104,12 @@ export async function createPurchaseRequestAction(
       return { status: "error", message: outcome.message };
     case "unauthorized":
       return { status: "error", message: "Oturumunuz sona ermiş.", requiresLogin: true };
+    case "forbidden":
+      return { status: "error", message: "Bu işlem için yetkiniz yok." };
     case "not_found":
       return { status: "error", message: "Organizasyon bulunamadı." };
+    case "gone":
+      return { status: "error", message: "Kaynak artık geçerli değil. Sayfayı yenileyin." };
     case "service_unavailable":
       return {
         status: "error",

@@ -21,8 +21,10 @@ const GENERIC_CONFLICT_MESSAGE = "Bu işlem şu anda tamamlanamadı (çakışma)
 /** İstek başarısızlığının kullanıcıya taşınabilir, güvenli sınıflandırması. */
 export type ApiFailure =
   | { readonly kind: "unauthorized" }
+  | { readonly kind: "forbidden" }
   | { readonly kind: "not_found" }
   | { readonly kind: "conflict"; readonly message: string }
+  | { readonly kind: "gone" }
   | { readonly kind: "validation_error"; readonly message: string }
   | { readonly kind: "service_unavailable" }
   | { readonly kind: "server_error" }
@@ -38,7 +40,8 @@ type RawResult =
 interface RequestOptions {
   readonly method: "GET" | "POST";
   readonly path: string;
-  readonly accessToken: string;
+  /** Bearer token — atlanırsa PUBLIC istek yapılır (Authorization header eklenmez). */
+  readonly accessToken?: string;
   readonly body?: unknown;
   readonly extraHeaders?: Readonly<Record<string, string>>;
 }
@@ -69,10 +72,11 @@ async function readJsonSafe(response: Response): Promise<unknown> {
 
 /** Düşük seviye istek: Bearer ekler, durum kodlarını failure'lara eşler. */
 export async function apiRequest(options: RequestOptions): Promise<RawResult> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${options.accessToken}`,
-    ...options.extraHeaders,
-  };
+  const headers: Record<string, string> = { ...options.extraHeaders };
+  // Bearer YALNIZ token verilmişse eklenir; public endpoint'ler (davet önizleme) token'sızdır.
+  if (options.accessToken !== undefined) {
+    headers.Authorization = `Bearer ${options.accessToken}`;
+  }
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -97,6 +101,9 @@ export async function apiRequest(options: RequestOptions): Promise<RawResult> {
   if (response.status === 401) {
     return { kind: "unauthorized" };
   }
+  if (response.status === 403) {
+    return { kind: "forbidden" };
+  }
   if (response.status === 404) {
     return { kind: "not_found" };
   }
@@ -105,6 +112,9 @@ export async function apiRequest(options: RequestOptions): Promise<RawResult> {
       kind: "conflict",
       message: extractDetailMessage(await readJsonSafe(response), GENERIC_CONFLICT_MESSAGE),
     };
+  }
+  if (response.status === 410) {
+    return { kind: "gone" };
   }
   if (response.status === 422) {
     return {

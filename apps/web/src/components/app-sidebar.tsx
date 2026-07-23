@@ -9,7 +9,7 @@
 import Link from "next/link";
 
 import { FlowPilotLogo } from "@/components/flowpilot-logo";
-import { NAV_ITEMS, type NavKey } from "@/components/nav-items";
+import { type NavKey, visibleNavItems } from "@/components/nav-items";
 import { OrganizationSwitcher } from "@/components/organization-switcher";
 import { signOutAction } from "@/features/auth/actions";
 
@@ -17,9 +17,17 @@ interface AppSidebarProps {
   readonly userEmail: string | null;
   readonly organizationName: string;
   readonly activeNav: NavKey;
+  /** owner/admin ise yönetim (Davetler) bağlantısı gösterilir. */
+  readonly canManage?: boolean;
 }
 
-export function AppSidebar({ userEmail, organizationName, activeNav }: AppSidebarProps) {
+export function AppSidebar({
+  userEmail,
+  organizationName,
+  activeNav,
+  canManage = false,
+}: AppSidebarProps) {
+  const items = visibleNavItems(canManage);
   return (
     <div className="flex h-full flex-col gap-6 bg-brand-900 px-4 py-5 text-white">
       <div className="px-1">
@@ -30,7 +38,7 @@ export function AppSidebar({ userEmail, organizationName, activeNav }: AppSideba
 
       <nav aria-label="Ana menü" className="flex-1">
         <ul className="flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => {
+          {items.map((item) => {
             const isActive = item.key === activeNav;
             return (
               <li key={item.key}>

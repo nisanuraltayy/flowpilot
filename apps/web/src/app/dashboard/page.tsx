@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/metric-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { WorkflowRail, type WorkflowStepData } from "@/components/workflow-rail";
 import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
+import { isOrgManagerRole } from "@/features/organizations/roles";
 import { PurchaseRequestList } from "@/features/purchase-requests/purchase-request-list";
 import { getMyTaskInbox, listMyPurchaseRequests } from "@/lib/api/resources";
 
@@ -50,6 +51,7 @@ export default async function DashboardPage() {
       userEmail={userEmail}
       organizationName={context.organization.name}
       activeNav="overview"
+      canManage={isOrgManagerRole(context.organization.membershipKind)}
     >
       {/* Hero — açık, premium yüzey (yoğun mor blok değil) */}
       <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:p-7">

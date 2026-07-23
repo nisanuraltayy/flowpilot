@@ -18,13 +18,16 @@ import { IDLE_RESULT, type ActionResult } from "@/features/auth/action-result";
 
 interface LoginFormProps {
   readonly action: (previous: ActionResult, formData: FormData) => Promise<ActionResult>;
+  /** Başarılı giriş sonrası dönülecek uygulama-içi yol (davet kabul akışı). */
+  readonly next?: string;
 }
 
-export function LoginForm({ action }: LoginFormProps) {
+export function LoginForm({ action, next }: LoginFormProps) {
   const [result, formAction] = useActionState(action, IDLE_RESULT);
 
   return (
     <form action={formAction} className="flex flex-col gap-4" noValidate>
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       {result.status === "error" ? <Alert tone="error">{result.message}</Alert> : null}
 
       <FormField

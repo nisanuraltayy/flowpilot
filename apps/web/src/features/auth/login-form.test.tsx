@@ -104,6 +104,20 @@ describe("LoginForm", () => {
     await screen.findByRole("button", { name: "Giriş yap" });
   });
 
+  it("next verildiğinde güvenli dönüş yolunu gizli input olarak taşır", () => {
+    const { container } = render(
+      <LoginForm action={failingAction("x")} next="/invitations/accept?org=1&token=2" />,
+    );
+    const hidden = container.querySelector('input[name="next"]');
+    expect(hidden).toHaveAttribute("type", "hidden");
+    expect(hidden).toHaveAttribute("value", "/invitations/accept?org=1&token=2");
+  });
+
+  it("next verilmediğinde gizli dönüş input'u render edilmez", () => {
+    const { container } = render(<LoginForm action={failingAction("x")} />);
+    expect(container.querySelector('input[name="next"]')).toBeNull();
+  });
+
   it("şifre değeri ekrana/DOM metnine sızmaz", async () => {
     const user = userEvent.setup();
     const secret = "cok-gizli-sifre-marker";

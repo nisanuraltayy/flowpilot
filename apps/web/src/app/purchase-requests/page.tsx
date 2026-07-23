@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
+import { isOrgManagerRole } from "@/features/organizations/roles";
 import { PurchaseRequestList } from "@/features/purchase-requests/purchase-request-list";
 import { listMyPurchaseRequests } from "@/lib/api/resources";
 
@@ -28,6 +29,7 @@ export default async function PurchaseRequestsPage() {
       userEmail={userEmail}
       organizationName={context.organization.name}
       activeNav="requests"
+      canManage={isOrgManagerRole(context.organization.membershipKind)}
     >
       <PageHeader
         title="Taleplerim"
