@@ -54,6 +54,22 @@ _APPROVAL_ROLE_PERMISSIONS = [
     Permission.APPROVAL_ROLE_ASSIGNMENT_CHANGE,
 ]
 
+_BLOCKED_TASK_PERMISSIONS = [
+    Permission.APPROVAL_BLOCKED_TASK_READ,
+    Permission.APPROVAL_BLOCKED_TASK_RESOLVE,
+]
+
+
+@pytest.mark.parametrize("role", ["owner", "admin"])
+@pytest.mark.parametrize("permission", _BLOCKED_TASK_PERMISSIONS)
+def test_owner_and_admin_can_manage_blocked_tasks(role: str, permission: Permission) -> None:
+    assert is_authorized(role=role, permission=permission) is True
+
+
+@pytest.mark.parametrize("permission", _BLOCKED_TASK_PERMISSIONS)
+def test_member_cannot_manage_blocked_tasks(permission: Permission) -> None:
+    assert is_authorized(role="member", permission=permission) is False
+
 
 @pytest.mark.parametrize("role", ["owner", "admin"])
 @pytest.mark.parametrize("permission", _APPROVAL_ROLE_PERMISSIONS)
@@ -69,7 +85,10 @@ def test_member_cannot_manage_approval_roles(permission: Permission) -> None:
 def test_member_has_no_permissions_and_owner_has_all() -> None:
     assert permissions_for_role("member") == frozenset()
     expected = frozenset(
-        _INVITATION_PERMISSIONS + _MEMBER_MGMT_PERMISSIONS + _APPROVAL_ROLE_PERMISSIONS
+        _INVITATION_PERMISSIONS
+        + _MEMBER_MGMT_PERMISSIONS
+        + _APPROVAL_ROLE_PERMISSIONS
+        + _BLOCKED_TASK_PERMISSIONS
     )
     assert permissions_for_role("owner") == expected
     assert permissions_for_role("admin") == expected

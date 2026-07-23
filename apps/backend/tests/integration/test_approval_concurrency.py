@@ -23,17 +23,17 @@ from tests.integration.purchase_support import (
     build_create_handler,
     build_decide_handler,
     scoped_count,
-    seed_tenant_with_member,
+    seed_tenant_requester_approver,
 )
 
 pytestmark = pytest.mark.integration
 
 
 def test_concurrent_decisions_single_winner(app_sessionmaker: sessionmaker[Session]) -> None:
-    tenant, actor = seed_tenant_with_member(app_sessionmaker)
+    tenant, requester, approver = seed_tenant_requester_approver(app_sessionmaker)
     created = build_create_handler(app_sessionmaker).handle(
         CreatePurchaseRequestCommand(
-            actor_user_id=actor,
+            actor_user_id=requester,
             tenant_id=tenant,
             title="Talep",
             description=None,
@@ -45,12 +45,11 @@ def test_concurrent_decisions_single_winner(app_sessionmaker: sessionmaker[Sessi
     decider = build_decide_handler(app_sessionmaker)
 
     def attempt(_: int) -> object:
-
         try:
             return decider.handle(
                 DecideApprovalTaskCommand(
                     tenant_id=tenant,
-                    actor_user_id=actor,
+                    actor_user_id=approver,  # onaycı = talep sahibinden AYRI (self-approval yasak)
                     task_id=task,
                     decision="approve",
                     comment=None,
