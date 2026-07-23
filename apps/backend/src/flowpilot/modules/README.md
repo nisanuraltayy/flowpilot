@@ -48,15 +48,15 @@ Bağımlılık oku **her zaman içe doğrudur**. Domain dış katmanları bilmez
 ```python
 # ✅ domain — yalnız kendi domain'i ve shared primitive'ler
 from flowpilot.shared.money import Money
-from flowpilot.modules.approval.domain.approval_step import ApprovalStep   # kendi modülü içinde
+from flowpilot.modules.approval.domain.approval_step import ApprovalStep  # kendi modülü içinde
 
 # ❌ domain katmanında framework / ORM / provider SDK
-from sqlalchemy import Column        # YASAK
-from fastapi import Depends          # YASAK
+from sqlalchemy import Column  # YASAK
+from fastapi import Depends  # YASAK
 
 # ❌ başka bir context'in domain veya infrastructure katmanı
-from flowpilot.modules.approval.infrastructure.models import ApprovalStepRow   # YASAK
-from flowpilot.modules.approval.domain.approval_step import ApprovalStep       # başka modülden YASAK
+from flowpilot.modules.approval.infrastructure.models import ApprovalStepRow  # YASAK
+from flowpilot.modules.approval.domain.approval_step import ApprovalStep  # başka modülden YASAK
 ```
 
 - Bir bounded context, başka bir context'in **`domain` veya `infrastructure`** katmanını **doğrudan import edemez**.
