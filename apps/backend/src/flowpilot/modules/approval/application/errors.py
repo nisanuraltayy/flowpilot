@@ -29,6 +29,10 @@ class DuplicateDecisionConflictError(DomainError):
     """Aynı idempotency key farklı payload ile geldi VEYA task zaten kararlaştırıldı (409)."""
 
 
+class SelfApprovalConflictError(DomainError):
+    """Talep sahibi kendi talebindeki adımı sonuçlandıramaz — güvenli conflict (409)."""
+
+
 __all__ = [
     "ActiveOwnerNotFoundError",
     "ApprovalMembershipNotActiveError",
@@ -36,4 +40,5 @@ __all__ = [
     "DuplicateDecisionConflictError",
     "InvalidApprovalCommentError",
     "InvalidApprovalDecisionError",
+    "SelfApprovalConflictError",
 ]

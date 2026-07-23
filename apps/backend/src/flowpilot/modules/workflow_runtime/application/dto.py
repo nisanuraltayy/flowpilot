@@ -92,6 +92,7 @@ class TaskView:
     approver_role: str
     status: str
     assigned_user_id: UUID | None = None
+    blocked_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,8 @@ class InstanceView:
     version: int
     branch_explanation: str | None = None
     active_task: TaskView | None = None
+    # İlk adım self-approval nedeniyle blocked ise (active_task None), baş adım burada döner.
+    blocked_task: TaskView | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +121,21 @@ class DecisionResult:
     required_role: str | None = None
     next_approval_role: str | None = None
     next_task_assigned_user_id: UUID | None = None
+    # Onay sonrası sıradaki adım self-approval nedeniyle blocked olduysa (activate → blocked).
+    blocked_task_id: UUID | None = None
+    blocked_role: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolveAssignmentResult:
+    task_id: UUID
+    instance_id: UUID
+    step_index: int
+    approver_role: str
+    status: str
+    assigned_user_id: UUID
+    version: int
+    purchase_request_id: UUID | None = None
 
 
 @dataclass(frozen=True)

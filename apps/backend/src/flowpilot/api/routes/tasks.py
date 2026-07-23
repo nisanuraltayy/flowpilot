@@ -35,6 +35,7 @@ from flowpilot.modules.approval.application.errors import (
     DuplicateDecisionConflictError,
     InvalidApprovalCommentError,
     InvalidApprovalDecisionError,
+    SelfApprovalConflictError,
 )
 from flowpilot.modules.organization.application.contracts import MembershipQuery
 from flowpilot.modules.purchase_request.application.ports import TaskInboxQuery
@@ -173,6 +174,9 @@ def decide_task(
         ) from exc
     except (ApprovalMembershipNotActiveError, ApprovalTaskNotAssignedError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND) from exc
+    except SelfApprovalConflictError as exc:
+        # Talep sahibi kendi talebindeki adımı sonuçlandıramaz (FP-E06-009) — güvenli 409.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except DuplicateDecisionConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

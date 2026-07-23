@@ -160,21 +160,25 @@ class CreatePurchaseRequestHandler:
                     role_assignees=role_assignees,
                 ),
             )
-            if submitted.active_task is None:
-                # İlk approval task oluşmadıysa hiçbir yarım kayıt bırakma (rollback).
+            # İlk adım self-approval nedeniyle BLOCKED olabilir (talep sahibi = çözülen
+            # assignee): görev requester'a atanmaz, active_task None gelir ama blocked_task
+            # dolar. Bu geçerli bir sonuçtur (rollback DEĞİL); iş akışı görünür biçimde bloke.
+            head_task = submitted.active_task or submitted.blocked_task
+            if head_task is None:
+                # Hiç approval task oluşmadıysa yarım kayıt bırakma (rollback).
                 raise FirstApprovalTaskMissingError("ilk approval task oluşmadı")
 
             linked = request.attach_workflow(workflow_instance_id=started.instance_id, now=now)
             uow.purchase_requests.update_checked(linked, expected_version=request.version)
 
-            # Denetim timeline'ının başlangıcı: created → started → task_assigned
+            # Denetim timeline'ının başlangıcı: created → started → task_assigned|task_blocked
             # (AYNI transaction; timeline bütünlüğü ve deterministik sıra için).
             self._write_creation_audit(
                 uow,
                 command,
                 pr_id=request.id.value,
                 instance_id=started.instance_id,
-                task=submitted.active_task,
+                task=head_task,
                 money=money,
                 now=now,
             )
@@ -188,7 +192,7 @@ class CreatePurchaseRequestHandler:
             title=title.value,
             amount_minor=money.amount_minor,
             currency=money.currency,
-            current_approval_role=submitted.active_task.approver_role,
+            current_approval_role=head_task.approver_role,
             created_at=now,
         )
 
@@ -239,11 +243,25 @@ class CreatePurchaseRequestHandler:
                 metadata={"workflow_instance_id": str(instance_id)},
             )
         )
-        uow.audit.append(
-            record(
-                AuditEventType.APPROVAL_TASK_ASSIGNED,
-                role=task.approver_role,
-                task_id=task.task_id,
-                metadata={},
+        if task.status == "blocked":
+            # Talep sahibi = çözülen assignee → adım blocked (uygun onaycı yok).
+            uow.audit.append(
+                record(
+                    AuditEventType.APPROVAL_TASK_BLOCKED,
+                    role=task.approver_role,
+                    task_id=task.task_id,
+                    metadata={
+                        "blocked_reason": task.blocked_reason or "",
+                        "requester_user_id": str(command.actor_user_id),
+                    },
+                )
             )
-        )
+        else:
+            uow.audit.append(
+                record(
+                    AuditEventType.APPROVAL_TASK_ASSIGNED,
+                    role=task.approver_role,
+                    task_id=task.task_id,
+                    metadata={},
+                )
+            )

@@ -41,5 +41,8 @@ class GetPurchaseRequestHandler:
             )
         except WorkflowInstanceNotFoundError:
             return detail
-        current_role = view.active_task.approver_role if view.active_task else None
+        # Mevcut adım: aktif task; yoksa (self-approval nedeniyle) blocked adım. Böylece
+        # talep sahibi detayda hangi rolde beklendiğini/blocke olduğunu görebilir.
+        current_task = view.active_task or view.blocked_task
+        current_role = current_task.approver_role if current_task else None
         return replace(detail, workflow_status=view.status, current_approval_role=current_role)

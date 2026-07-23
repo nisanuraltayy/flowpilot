@@ -26,12 +26,13 @@ def _alembic_config(url: str) -> Config:
     return cfg
 
 
-def test_single_head_is_0010(database: DatabaseHandle) -> None:
+def test_single_head_advanced_past_0010(database: DatabaseHandle) -> None:
     engine = create_engine(database.migrator_url)
     with engine.connect() as conn:
         heads = {r[0] for r in conn.execute(text("SELECT version_num FROM alembic_version")).all()}
     engine.dispose()
-    assert heads == {"0010"}, f"beklenen tek head 0010, bulunan: {heads}"
+    # Zincir 0011'e ilerledi (0010 artık head değil); tek head güncel migration'dur.
+    assert heads == {"0011"}, f"beklenen tek head 0011, bulunan: {heads}"
 
 
 def test_version_column_not_null(app_sessionmaker: sessionmaker[Session]) -> None:

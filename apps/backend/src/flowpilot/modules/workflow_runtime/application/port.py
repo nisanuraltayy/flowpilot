@@ -23,6 +23,7 @@ from flowpilot.modules.workflow_runtime.application.dto import (
     InstanceView,
     PublishDefinitionCommand,
     PublishDefinitionResult,
+    ResolveAssignmentResult,
     ScheduleTimerCommand,
     StartInstanceCommand,
     SubmitFormCommand,
@@ -99,6 +100,10 @@ class TaskRepository(Protocol):
     def add(self, task: WorkflowTask, *, now: datetime) -> None: ...
 
     def get(self, task_id: UUID) -> WorkflowTask: ...
+
+    def get_for_update(self, task_id: UUID) -> WorkflowTask:
+        """Task'ı satır kilidiyle okur (eşzamanlı resolve serileştirmesi)."""
+        ...
 
     def list_for_instance(self, instance_id: UUID) -> list[WorkflowTask]: ...
 
@@ -251,3 +256,13 @@ class WorkflowRuntimeTransactionPort(Protocol):
         idempotency_key: str,
         approver_role: str | None = None,
     ) -> DecisionResult: ...
+
+    def resolve_blocked_task_tx(
+        self,
+        uow: WorkflowUnitOfWork,
+        *,
+        tenant_id: UUID,
+        task_id: UUID,
+        new_assignee_id: UUID,
+        now: datetime,
+    ) -> ResolveAssignmentResult: ...

@@ -22,6 +22,7 @@ from flowpilot.modules.workflow_runtime.application.dto import (
     InstanceView,
     PublishDefinitionCommand,
     PublishDefinitionResult,
+    ResolveAssignmentResult,
     ScheduleTimerCommand,
     StartInstanceCommand,
     SubmitFormCommand,
@@ -43,6 +44,7 @@ from flowpilot.modules.workflow_runtime.domain.errors import (
     DefinitionValidationError,
     DuplicateDecisionError,
     InvalidTransitionError,
+    SelfApprovalForbiddenError,
 )
 from flowpilot.modules.workflow_runtime.domain.event import IntegrationEvent, WorkflowEvent
 from flowpilot.modules.workflow_runtime.domain.identifiers import (
@@ -53,7 +55,10 @@ from flowpilot.modules.workflow_runtime.domain.identifiers import (
     WorkflowTaskId,
 )
 from flowpilot.modules.workflow_runtime.domain.instance import WorkflowInstance
-from flowpilot.modules.workflow_runtime.domain.task import WorkflowTask
+from flowpilot.modules.workflow_runtime.domain.task import (
+    SELF_APPROVAL_BLOCKED_REASON,
+    WorkflowTask,
+)
 from flowpilot.shared.clock import ClockPort
 from flowpilot.shared.identifiers import TenantId, UserId
 from flowpilot.shared.ids import IdGeneratorPort
@@ -279,10 +284,25 @@ class WorkflowRuntimeService:
         )
         uow.instances.update_checked(advanced, expected_version=command.expected_version, now=now)
 
+        # Self-approval engeli (FP-E06-009): oluşturma anında çözülen assignee talep sahibiyse
+        # görev requester'a ATANMAZ; baş adımsa BLOCKED, sonraki adımsa PENDING olarak
+        # ön-işaretlenir (aktive olurken BLOCKED'a materyalize olur). requester_id start'ta
+        # instance.context'e yazılır; merged_context onu taşır.
+        requester_id = merged_context.get("requester_id")
         active_task: WorkflowTask | None = None
+        blocked_head: WorkflowTask | None = None
         for index, role in enumerate(chain):
             assignee_raw = command.role_assignees.get(role)
-            assignee = UserId(UUID(assignee_raw)) if assignee_raw else None
+            is_self = (
+                assignee_raw is not None
+                and requester_id is not None
+                and assignee_raw == requester_id
+            )
+            assignee = None if is_self else (UserId(UUID(assignee_raw)) if assignee_raw else None)
+            if index == 0:
+                status = WorkflowTaskStatus.BLOCKED if is_self else WorkflowTaskStatus.ACTIVE
+            else:
+                status = WorkflowTaskStatus.PENDING
             task = WorkflowTask(
                 id=WorkflowTaskId(self._ids.new_uuid()),
                 tenant_id=tenant,
@@ -290,18 +310,43 @@ class WorkflowRuntimeService:
                 node_id=str(approval_node["id"]),
                 step_index=index,
                 approver_role=role,
-                status=WorkflowTaskStatus.ACTIVE if index == 0 else WorkflowTaskStatus.PENDING,
+                status=status,
                 version=1,
                 assigned_user_id=assignee,
+                blocked_reason=SELF_APPROVAL_BLOCKED_REASON if is_self else None,
+                blocked_at=now if (is_self and index == 0) else None,
             )
             uow.tasks.add(task, now=now)
             if index == 0:
-                active_task = task
+                if is_self:
+                    blocked_head = task
+                else:
+                    active_task = task
+
+        if blocked_head is not None:
+            self._append_event(
+                uow,
+                tenant=tenant,
+                instance_id=instance.id,
+                event_type="task.blocked",
+                node_id=str(approval_node["id"]),
+                actor_type="system",
+                now=now,
+                detail={
+                    "task_id": str(blocked_head.id.value),
+                    "step_index": 0,
+                    "role": blocked_head.approver_role,
+                    "reason": SELF_APPROVAL_BLOCKED_REASON,
+                },
+            )
 
         for node, detail in (
             (form_node, {"fields": sorted(command.form_data)}),
             (condition_node, {"branch": selection.branch_id, "explanation": selection.explanation}),
-            (approval_node, {"chain": chain, "activated_step_index": 0}),
+            (
+                approval_node,
+                {"chain": chain, "activated_step_index": 0, "blocked": blocked_head is not None},
+            ),
         ):
             self._append_event(
                 uow,
@@ -325,7 +370,8 @@ class WorkflowRuntimeService:
             now=now,
         )
         return _with_explanation(
-            self._view(advanced, active_task=active_task), selection.explanation
+            self._view(advanced, active_task=active_task, blocked_task=blocked_head),
+            selection.explanation,
         )
 
     # ------------------------------------------------------------ decide task
@@ -374,6 +420,16 @@ class WorkflowRuntimeService:
 
         task = uow.tasks.get(task_id)
         instance = uow.instances.get(task.instance_id.value)
+
+        # Karar anı savunması (FP-E06-009): talep sahibi kendi talebindeki hiçbir adımı
+        # sonuçlandıramaz — assignee snapshot'ı yanlışlıkla requester olsa (legacy/veri
+        # uyumsuzluğu) veya doğrudan API çağrısı yapılsa bile. HERHANGİ bir mutasyondan ÖNCE,
+        # replay yolundan da ÖNCE reddedilir (requester asla başarıyla karar veremez).
+        requester_id = instance.context.get("requester_id")
+        if requester_id is not None and str(actor_user_id) == requester_id:
+            raise SelfApprovalForbiddenError(
+                "talep sahibi kendi talebindeki onay adımını sonuçlandıramaz"
+            )
 
         # Terminal TASK için GERÇEK idempotent replay'i (aynı actor + aynı key) instance
         # terminal guard'ından ÖNCE ele al: nihai adımın (instance'ı tamamlayan) kararı
@@ -427,17 +483,40 @@ class WorkflowRuntimeService:
         activated_task_id: UUID | None = None
         next_role: str | None = None
         next_assignee: UUID | None = None
+        blocked_task_id: UUID | None = None
+        blocked_role: str | None = None
         instance_status = instance.status
         if decision_status is WorkflowTaskStatus.APPROVED:
             next_task = uow.tasks.find_by_step(instance.id.value, task.step_index + 1)
             if next_task is not None:
-                activated = next_task.activate()
+                # activate(): ön-işaretli self-conflict adımı ACTIVE yerine BLOCKED olur —
+                # workflow bu adımda DURUR (daha ileri ilerlemez), talep sahibine atanmaz.
+                activated = next_task.activate(now=now)
                 uow.tasks.update_checked(activated, expected_version=next_task.version, now=now)
-                activated_task_id = activated.id.value
-                next_role = activated.approver_role
-                next_assignee = (
-                    activated.assigned_user_id.value if activated.assigned_user_id else None
-                )
+                if activated.status is WorkflowTaskStatus.BLOCKED:
+                    blocked_task_id = activated.id.value
+                    blocked_role = activated.approver_role
+                    self._append_event(
+                        uow,
+                        tenant=tenant,
+                        instance_id=instance.id,
+                        event_type="task.blocked",
+                        node_id=activated.node_id,
+                        actor_type="system",
+                        now=now,
+                        detail={
+                            "task_id": str(activated.id.value),
+                            "step_index": activated.step_index,
+                            "role": activated.approver_role,
+                            "reason": SELF_APPROVAL_BLOCKED_REASON,
+                        },
+                    )
+                else:
+                    activated_task_id = activated.id.value
+                    next_role = activated.approver_role
+                    next_assignee = (
+                        activated.assigned_user_id.value if activated.assigned_user_id else None
+                    )
             else:
                 instance = self._finish_instance(uow, instance, tenant=tenant, now=now)
                 instance_status = instance.status
@@ -489,6 +568,60 @@ class WorkflowRuntimeService:
             required_role=task.approver_role,
             next_approval_role=next_role,
             next_task_assigned_user_id=next_assignee,
+            blocked_task_id=blocked_task_id,
+            blocked_role=blocked_role,
+        )
+
+    # -------------------------------------------------- resolve blocked task
+
+    def resolve_blocked_task_tx(
+        self,
+        uow: WorkflowUnitOfWork,
+        *,
+        tenant_id: UUID,
+        task_id: UUID,
+        new_assignee_id: UUID,
+        now: datetime,
+    ) -> ResolveAssignmentResult:
+        """Self-approval nedeniyle blocked kalan adımı uygun kullanıcıya atar — SAĞLANAN
+        uow, COMMIT ETMEZ. Task satırı FOR UPDATE ile kilitlenir (eşzamanlı resolve → tek
+        kazanan). Yeni assignee talep sahibi OLAMAZ (invariant burada da korunur). Yeni
+        kullanıcının aktif üye olduğu + rol atamasının kaynak olduğu ÇAĞIRAN'da doğrulanır.
+        """
+        tenant = TenantId(tenant_id)
+        task = uow.tasks.get_for_update(task_id)
+        instance = uow.instances.get(task.instance_id.value)
+        requester_id = instance.context.get("requester_id")
+        if requester_id is not None and str(new_assignee_id) == requester_id:
+            raise SelfApprovalForbiddenError("yeni assignee talep sahibi olamaz")
+        # resolve_assignment: yalnız self-approval nedeniyle BLOCKED adım → active (aksi
+        # halde TaskNotBlockedError). Eşzamanlı ikinci resolve artık-active task'ta buraya
+        # düşer ve TaskNotBlockedError alır.
+        resolved = task.resolve_assignment(new_assignee=UserId(new_assignee_id), now=now)
+        uow.tasks.update_checked(resolved, expected_version=task.version, now=now)
+        self._append_event(
+            uow,
+            tenant=tenant,
+            instance_id=instance.id,
+            event_type="task.assignment_resolved",
+            node_id=task.node_id,
+            actor_type="user",
+            now=now,
+            detail={
+                "task_id": str(task.id.value),
+                "step_index": task.step_index,
+                "role": task.approver_role,
+                "new_assigned_user_id": str(new_assignee_id),
+            },
+        )
+        return ResolveAssignmentResult(
+            task_id=resolved.id.value,
+            instance_id=instance.id.value,
+            step_index=resolved.step_index,
+            approver_role=resolved.approver_role,
+            status=resolved.status.value,
+            assigned_user_id=new_assignee_id,
+            version=resolved.version,
         )
 
     # ------------------------------------------------------------ cancel
@@ -541,15 +674,12 @@ class WorkflowRuntimeService:
         with self._uow_factory() as uow:
             uow.set_tenant_context(tenant_id)
             instance = uow.instances.get(instance_id)
-            active = next(
-                (
-                    t
-                    for t in uow.tasks.list_for_instance(instance_id)
-                    if t.status is WorkflowTaskStatus.ACTIVE
-                ),
-                None,
-            )
-            return self._view(instance, active_task=active)
+            tasks = uow.tasks.list_for_instance(instance_id)
+            active = next((t for t in tasks if t.status is WorkflowTaskStatus.ACTIVE), None)
+            # Aktif adım yoksa mevcut BLOCKED adımı da yansıt (self-approval görünürlüğü):
+            # detay/read model current step rolünü blocked adımdan da okuyabilir.
+            blocked = next((t for t in tasks if t.status is WorkflowTaskStatus.BLOCKED), None)
+            return self._view(instance, active_task=active, blocked_task=blocked)
 
     def get_timeline(self, *, tenant_id: UUID, instance_id: UUID) -> list[TimelineEntry]:
         with self._uow_factory() as uow:
@@ -788,22 +918,12 @@ class WorkflowRuntimeService:
         )
 
     def _view(
-        self, instance: WorkflowInstance, *, active_task: WorkflowTask | None
+        self,
+        instance: WorkflowInstance,
+        *,
+        active_task: WorkflowTask | None,
+        blocked_task: WorkflowTask | None = None,
     ) -> InstanceView:
-        task_view = (
-            TaskView(
-                task_id=active_task.id.value,
-                node_id=active_task.node_id,
-                step_index=active_task.step_index,
-                approver_role=active_task.approver_role,
-                status=active_task.status.value,
-                assigned_user_id=(
-                    active_task.assigned_user_id.value if active_task.assigned_user_id else None
-                ),
-            )
-            if active_task is not None
-            else None
-        )
         return InstanceView(
             instance_id=instance.id.value,
             definition_version_id=instance.definition_version_id.value,
@@ -811,11 +931,26 @@ class WorkflowRuntimeService:
             status=instance.status.value,
             current_node_id=instance.current_node_id,
             version=instance.version,
-            active_task=task_view,
+            active_task=_task_view(active_task),
+            blocked_task=_task_view(blocked_task),
         )
 
 
 _CONSUMER = "workflow-runtime-worker"
+
+
+def _task_view(task: WorkflowTask | None) -> TaskView | None:
+    if task is None:
+        return None
+    return TaskView(
+        task_id=task.id.value,
+        node_id=task.node_id,
+        step_index=task.step_index,
+        approver_role=task.approver_role,
+        status=task.status.value,
+        assigned_user_id=task.assigned_user_id.value if task.assigned_user_id else None,
+        blocked_reason=task.blocked_reason,
+    )
 
 
 def _version_result(version: WorkflowDefinitionVersion) -> PublishDefinitionResult:
@@ -837,4 +972,5 @@ def _with_explanation(view: InstanceView, explanation: str) -> InstanceView:
         version=view.version,
         branch_explanation=explanation,
         active_task=view.active_task,
+        blocked_task=view.blocked_task,
     )

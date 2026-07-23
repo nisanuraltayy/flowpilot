@@ -28,13 +28,13 @@ def _alembic_config(url: str) -> Config:
 
 
 def test_single_head_advanced_past_0009(database: DatabaseHandle) -> None:
-    # 0009 artık head DEĞİL (0010 tarafından revise edildi); tek head 0010'dur. Bu test
-    # yalnız "tek head var ve zincir 0009'un ötesine ilerledi" invariant'ını doğrular.
+    # 0009 artık head DEĞİL; zincir ileri taşındı. Bu test yalnız "tek head var ve zincir
+    # 0009'un ötesinde" invariant'ını doğrular (güncel head en son migration'dur).
     engine = create_engine(database.migrator_url)
     with engine.connect() as conn:
         heads = {r[0] for r in conn.execute(text("SELECT version_num FROM alembic_version")).all()}
     engine.dispose()
-    assert heads == {"0010"}, f"beklenen tek head 0010, bulunan: {heads}"
+    assert heads == {"0011"}, f"beklenen tek head 0011, bulunan: {heads}"
 
 
 def test_version_and_updated_at_columns(app_sessionmaker: sessionmaker[Session]) -> None:

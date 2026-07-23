@@ -104,11 +104,15 @@ tasks_table = Table(
     Column("decided_by_user_id", UUID(as_uuid=True), nullable=True),
     Column("decision", String(32), nullable=True),
     Column("idempotency_key", String(200), nullable=True),
+    # blocked (uygun onaycı yok — ör. çözülen assignee talep sahibi): migration 0011.
+    Column("blocked_reason", String(64), nullable=True),
+    Column("blocked_at", DateTime(timezone=True), nullable=True),
     Column("version", Integer, nullable=False, server_default="1"),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint(
-        "status IN ('pending','active','approved','rejected','changes_requested','cancelled')",
+        "status IN ('pending','active','blocked','approved','rejected',"
+        "'changes_requested','cancelled')",
         name="status_valid",
     ),
     # Duplicate task koruması: bir instance'ta bir node'un bir adımı tek kez.

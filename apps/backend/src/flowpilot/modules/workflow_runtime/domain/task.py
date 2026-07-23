@@ -9,12 +9,14 @@ ile birlikte DB düzeyinde de zorlanır.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime
 
 from flowpilot.modules.workflow_runtime.domain.enums import WorkflowTaskStatus
 from flowpilot.modules.workflow_runtime.domain.errors import (
     DuplicateDecisionError,
     InvalidTransitionError,
     SequenceOrderError,
+    TaskNotBlockedError,
     UnauthorizedApproverError,
 )
 from flowpilot.modules.workflow_runtime.domain.identifiers import (
@@ -24,6 +26,9 @@ from flowpilot.modules.workflow_runtime.domain.identifiers import (
 from flowpilot.shared.identifiers import TenantId, UserId
 
 _DECISION_STATES = frozenset({WorkflowTaskStatus.APPROVED, WorkflowTaskStatus.REJECTED})
+
+# Uygun onaycı yok (çözülen assignee talep sahibi) → adım blocked. Tek geçerli değer.
+SELF_APPROVAL_BLOCKED_REASON = "self_approval_no_eligible_assignee"
 
 
 @dataclass(frozen=True)
@@ -45,14 +50,52 @@ class WorkflowTask:
     # rol ataması sonradan değişse bile bu task'ın assignee'si DEĞİŞMEZ. None ise
     # (assignee-öncesi runtime testleri) yetki role üzerinden değerlendirilir.
     assigned_user_id: UserId | None = None
+    # Self-approval engeli (FP-E06-009): oluşturma anında çözülen assignee talep sahibiyse
+    # görev requester'a ATANMAZ (assigned_user_id None) ve `blocked_reason` ön-işaretlenir.
+    # PENDING bir adımda ön-işaretli reason, adım aktive olurken BLOCKED'a materyalize olur.
+    blocked_reason: str | None = None
+    blocked_at: datetime | None = None
 
-    def activate(self) -> WorkflowTask:
-        """pending → active (önceki adım tamamlanınca)."""
+    @property
+    def is_self_conflict(self) -> bool:
+        """Oluşturma anındaki assignee talep sahibiydi (uygun onaycı yok)."""
+        return self.blocked_reason == SELF_APPROVAL_BLOCKED_REASON
+
+    def activate(self, *, now: datetime) -> WorkflowTask:
+        """pending → active (önceki adım tamamlanınca).
+
+        Ön-işaretli self-conflict adımı ACTIVE yerine BLOCKED'a geçer (talep sahibine
+        atanmaz, inbox'ta görünmez). Workflow bu adımda durur; yalnız resolve ile açılır.
+        """
         if self.status is not WorkflowTaskStatus.PENDING:
             raise InvalidTransitionError(
                 f"task aktive edilemez: {self.status.value} (pending bekleniyor)"
             )
+        if self.is_self_conflict:
+            return replace(
+                self,
+                status=WorkflowTaskStatus.BLOCKED,
+                blocked_at=now,
+                version=self.version + 1,
+            )
         return replace(self, status=WorkflowTaskStatus.ACTIVE, version=self.version + 1)
+
+    def resolve_assignment(self, *, new_assignee: UserId, now: datetime) -> WorkflowTask:
+        """blocked → active: yalnız self-approval nedeniyle blocked adımı uygun kullanıcıya
+        atar (blocked_reason temizlenir). Yeni kullanıcının talep sahibi olmadığı ve aktif
+        üye olduğu ÇAĞIRAN tarafında (runtime/handler) doğrulanır."""
+        if self.status is not WorkflowTaskStatus.BLOCKED or not self.is_self_conflict:
+            raise TaskNotBlockedError(
+                f"adım {self.step_index} self-approval nedeniyle blocked değil — resolve edilemez"
+            )
+        return replace(
+            self,
+            status=WorkflowTaskStatus.ACTIVE,
+            assigned_user_id=new_assignee,
+            blocked_reason=None,
+            blocked_at=None,
+            version=self.version + 1,
+        )
 
     def decide(
         self,
@@ -70,6 +113,11 @@ class WorkflowTask:
         if decision not in _DECISION_STATES:
             raise InvalidTransitionError(f"geçersiz karar: {decision!r}")
 
+        if self.status is WorkflowTaskStatus.BLOCKED:
+            raise SequenceOrderError(
+                f"adım {self.step_index} blocked (uygun onaycı yok) — karar verilemez, "
+                f"önce assignment resolve edilmelidir"
+            )
         if self.status is WorkflowTaskStatus.PENDING:
             raise SequenceOrderError(
                 f"adım {self.step_index} henüz aktif değil — önceki adım tamamlanmadan "

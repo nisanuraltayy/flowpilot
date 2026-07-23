@@ -169,6 +169,36 @@ def seed_tenant_with_member(
     return tenant_id, user_id
 
 
+def seed_tenant_requester_approver(
+    app_sessionmaker: sessionmaker[Session],
+) -> tuple[UUID, UUID, UUID]:
+    """tenant + requester(owner) + approver(3 approval rolüne atanmış ayrı aktif üye).
+
+    Self-approval YASAK olduğu için (FP-E06-009) onaycı, talep sahibinden AYRI olmalıdır.
+    (tenant_id, requester_user_id, approver_user_id) döndürür.
+    """
+    from flowpilot.modules.approval.application.role_assignment_dto import (
+        AssignApprovalRoleCommand,
+    )
+    from tests.integration.approval_role_support import build_assign_approval_role_handler
+    from tests.integration.invitation_support import add_member, create_tenant_with_owner
+
+    tenant, requester = create_tenant_with_owner(app_sessionmaker, owner_subject="requester")
+    approver = add_member(app_sessionmaker, tenant_id=tenant, subject="approver", role="member")
+    assign = build_assign_approval_role_handler(app_sessionmaker)
+    for role in ("team_manager", "finance", "general_manager"):
+        assign.handle(
+            AssignApprovalRoleCommand(
+                tenant_id=tenant,
+                actor_user_id=requester,
+                role_key=role,
+                target_user_id=approver,
+                expected_version=None,
+            )
+        )
+    return tenant, requester, approver
+
+
 def scoped_count(
     app_sessionmaker: sessionmaker[Session], tenant_id: UUID, table: str, **where: str
 ) -> int:

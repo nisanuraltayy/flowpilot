@@ -164,6 +164,6 @@ def test_invalid_decision_value_rejected() -> None:
 
 
 def test_pending_activates() -> None:
-    activated = _task(WorkflowTaskStatus.PENDING, index=1).activate()
+    activated = _task(WorkflowTaskStatus.PENDING, index=1).activate(now=NOW)
     assert activated.status is WorkflowTaskStatus.ACTIVE
     assert activated.version == 2

@@ -28,14 +28,20 @@ from flowpilot.api.wiring import (
     SqlAlchemyApprovalDecisionUnitOfWork,
     SqlAlchemyApprovalRoleAssignmentListReadModel,
     SqlAlchemyApprovalRoleAssignmentUpdateUnitOfWork,
+    SqlAlchemyBlockedApprovalTaskListReadModel,
     SqlAlchemyInvitationAcceptUnitOfWork,
     SqlAlchemyInvitationUnitOfWork,
     SqlAlchemyMemberListReadModel,
     SqlAlchemyMemberUpdateUnitOfWork,
     SqlAlchemyPurchaseRequestUnitOfWork,
+    SqlAlchemyResolveBlockedTaskUnitOfWork,
     SqlAlchemyTaskInboxReadModel,
 )
 from flowpilot.config.settings import Settings
+from flowpilot.modules.approval.application.blocked_task_handlers import (
+    ListBlockedApprovalTasksHandler,
+    ResolveBlockedApprovalTaskHandler,
+)
 from flowpilot.modules.approval.application.decide_handler import DecideApprovalTaskHandler
 from flowpilot.modules.approval.application.ensure_assignments import (
     DefaultApproverResolver,
@@ -373,6 +379,27 @@ def get_decide_approval_task_handler(
     """Onay kararı atomik use-case'i — runtime tx-port + compose UoW (tek transaction)."""
     return DecideApprovalTaskHandler(
         unit_of_work_factory=lambda: SqlAlchemyApprovalDecisionUnitOfWork(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+        runtime=_build_runtime_service(session_factory),
+        clock=SystemClock(),
+        id_generator=UuidGenerator(),
+    )
+
+
+def get_list_blocked_approval_tasks_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> ListBlockedApprovalTasksHandler:
+    return ListBlockedApprovalTasksHandler(
+        list_query=SqlAlchemyBlockedApprovalTaskListReadModel(session_factory),
+        membership_query=SqlAlchemyMembershipQuery(session_factory),
+    )
+
+
+def get_resolve_blocked_approval_task_handler(
+    session_factory: Annotated[sessionmaker[Session], Depends(get_session_factory)],
+) -> ResolveBlockedApprovalTaskHandler:
+    return ResolveBlockedApprovalTaskHandler(
+        unit_of_work_factory=lambda: SqlAlchemyResolveBlockedTaskUnitOfWork(session_factory),
         membership_query=SqlAlchemyMembershipQuery(session_factory),
         runtime=_build_runtime_service(session_factory),
         clock=SystemClock(),
