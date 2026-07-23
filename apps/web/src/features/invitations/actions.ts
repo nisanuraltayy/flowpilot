@@ -5,7 +5,9 @@
  *
  * Güvenlik:
  * - Access token YALNIZ server tarafında okunur ve FastAPI'ye iletilir; browser/log'a taşınmaz.
- * - Idempotency-Key her submit'te server tarafında üretilir (localStorage'a YAZILMAZ).
+ * - Idempotency-Key mantıksal işlem başına istemcide üretilir ve retry'da AYNI kalır (form'dan
+ *   gelir); geçersiz/eksikse server tarafında güvenli biçimde üretilir. Key hassas değildir
+ *   (rastgele UUID); localStorage/cookie/URL/log'a YAZILMAZ.
  * - Ham davet token'ı YALNIZ create sonucundaki davet URL'sinin içinde döner ve modal
  *   kapanınca istemci state'inden temizlenir; log/analytics/storage'a yazılmaz.
  * - Kabul URL'sinin domain kısmı env base URL convention'ından gelir (hardcode yok).
@@ -77,6 +79,19 @@ export type AcceptErrorKind =
   | "unavailable"
   | "unexpected";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * İstemcinin (mantıksal işlem başına üretip retry'da tekrar gönderdiği) Idempotency-Key'ini
+ * form'dan alır. İstemci key'i, backend'in aynı retry'ı tek işlem olarak görmesini sağlar.
+ * Eksik/biçimsiz ise (JS'siz istemci, kurcalanmış istek) güvenli fallback olarak server üretir
+ * — böylece her istekte DAİMA geçerli bir key gider. Key hassas değildir; loglanmaz.
+ */
+function resolveIdempotencyKey(formData: FormData): string {
+  const raw = formData.get("idempotencyKey");
+  return typeof raw === "string" && UUID_RE.test(raw) ? raw : randomUUID();
+}
+
 function fieldErrorsFromZod(error: {
   issues: readonly { path: readonly PropertyKey[]; message: string }[];
 }): Record<string, string[]> {
@@ -118,7 +133,11 @@ export async function createInvitationAction(
   const outcome = await createInvitation(
     context.accessToken,
     context.organization.organizationId,
-    { email: parsed.data.email, role: parsed.data.role, idempotencyKey: randomUUID() },
+    {
+      email: parsed.data.email,
+      role: parsed.data.role,
+      idempotencyKey: resolveIdempotencyKey(formData),
+    },
   );
 
   switch (outcome.kind) {
@@ -205,11 +224,9 @@ export async function revokeInvitationAction(
 export async function acceptInvitationAction(
   organizationId: string,
   token: string,
-  // useActionState/bound-action imzası gereği alınır ama kullanılmaz (bilinçli).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // useActionState imzası gereği alınır ama kullanılmaz (underscore → lint ignore).
   _previous: AcceptInvitationResult,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _formData: FormData,
+  formData: FormData,
 ): Promise<AcceptInvitationResult> {
   const accessToken = await getServerAccessToken();
   if (accessToken === null) {
@@ -223,7 +240,7 @@ export async function acceptInvitationAction(
   const outcome = await acceptInvitation(accessToken, {
     organizationId,
     token,
-    idempotencyKey: randomUUID(),
+    idempotencyKey: resolveIdempotencyKey(formData),
   });
 
   switch (outcome.kind) {

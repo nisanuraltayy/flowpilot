@@ -7,12 +7,40 @@
 
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { CreateInvitationResult } from "@/features/invitations/actions";
 import { CreateInvitationForm } from "@/features/invitations/create-invitation-form";
 
 const INVITE_URL = "https://app.example.com/invitations/accept?org=1&token=raw-token-marker";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Deterministik, artan UUID üreteci (gerçek rastgele değere bağlanmadan). */
+function seqGen(): () => string {
+  let n = 0;
+  return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+}
+
+/** Gönderilen Idempotency-Key'leri kaydeden fake action. */
+function recording(next: () => CreateInvitationResult) {
+  const keys: (string | null)[] = [];
+  const action = async (
+    _previous: CreateInvitationResult,
+    formData: FormData,
+  ): Promise<CreateInvitationResult> => {
+    const raw = formData.get("idempotencyKey");
+    keys.push(typeof raw === "string" && raw !== "" ? raw : null);
+    return next();
+  };
+  return { action, keys };
+}
+
+async function retypeEmail(user: ReturnType<typeof userEvent.setup>, value: string) {
+  // React 19 hata sonrası uncontrolled alanı sıfırlar → retry'da yeniden yazılır (gerçek akış).
+  const input = screen.getByLabelText("E-posta");
+  await user.clear(input);
+  await user.type(input, value);
+}
 
 function succeeding(
   overrides: { duplicate?: boolean; inviteUrl?: string | null } = {},
@@ -86,5 +114,115 @@ describe("CreateInvitationForm", () => {
 
     await submit(user);
     expect(await screen.findByText("Geçerli bir e-posta girin.")).toBeInTheDocument();
+  });
+});
+
+describe("CreateInvitationForm — Idempotency-Key yaşam döngüsü", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  const anError = (): CreateInvitationResult => ({ status: "error", message: "geçici" });
+  const aSuccess = (): CreateInvitationResult => ({
+    status: "success",
+    invitedEmail: "a@b.com",
+    role: "member",
+    expiresAt: "2026-07-30T00:00:00Z",
+    duplicate: false,
+    inviteUrl: INVITE_URL,
+  });
+
+  it("ilk submit bir UUID key üretir", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(anError);
+    render(<CreateInvitationForm action={action} generateIdempotencyKey={seqGen()} />);
+
+    await user.type(screen.getByLabelText("E-posta"), "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(UUID_RE);
+  });
+
+  it("aynı payload retry'ında AYNI key kullanılır (alan sıfırlansa da)", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(anError);
+    render(<CreateInvitationForm action={action} generateIdempotencyKey={seqGen()} />);
+
+    await retypeEmail(user, "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+    await screen.findByRole("alert");
+    // Hata sonrası React alanı sıfırlar; kullanıcı aynı e-postayı yeniden yazıp retry eder.
+    await retypeEmail(user, "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toMatch(UUID_RE);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("e-posta değişirse yeni key üretilir", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(anError);
+    render(<CreateInvitationForm action={action} generateIdempotencyKey={seqGen()} />);
+
+    await retypeEmail(user, "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+    await screen.findByRole("alert");
+    await retypeEmail(user, "farkli@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("rol değişirse yeni key üretilir", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(anError);
+    render(<CreateInvitationForm action={action} generateIdempotencyKey={seqGen()} />);
+
+    await retypeEmail(user, "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+    await screen.findByRole("alert");
+    await retypeEmail(user, "a@b.com");
+    await user.selectOptions(screen.getByLabelText("Rol"), "admin");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("başarılı işlemden (modal kapanınca) sonraki yeni submit yeni key kullanır", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(aSuccess);
+    render(<CreateInvitationForm action={action} generateIdempotencyKey={seqGen()} />);
+
+    await retypeEmail(user, "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getAllByRole("button", { name: "Kapat" })[0]);
+
+    await retypeEmail(user, "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("key browser storage'a yazılmaz", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(anError);
+    render(<CreateInvitationForm action={action} generateIdempotencyKey={seqGen()} />);
+
+    await user.type(screen.getByLabelText("E-posta"), "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Davet oluştur" }));
+
+    const key = keys[0] ?? "";
+    expect(key).toMatch(UUID_RE);
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
+    expect(document.cookie).not.toContain(key);
   });
 });

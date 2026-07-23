@@ -108,3 +108,90 @@ describe("InvitationAcceptView", () => {
     expect(alert).toHaveTextContent("Bu davet farklı bir e-posta adresi için oluşturulmuş.");
   });
 });
+
+describe("InvitationAcceptView — Idempotency-Key yaşam döngüsü", () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  function seqGen(): () => string {
+    let n = 0;
+    return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+  }
+
+  function recording(next: () => AcceptInvitationResult) {
+    const keys: (string | null)[] = [];
+    const action = async (
+      _previous: AcceptInvitationResult,
+      formData: FormData,
+    ): Promise<AcceptInvitationResult> => {
+      const raw = formData.get("idempotencyKey");
+      keys.push(typeof raw === "string" && raw !== "" ? raw : null);
+      return next();
+    };
+    return { action, keys };
+  }
+
+  const unavailable = (): AcceptInvitationResult => ({
+    status: "error",
+    kind: "unavailable",
+    message: "geçici",
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  it("ilk kabul bir UUID key üretir", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(unavailable);
+    render(base({ action, generateIdempotencyKey: seqGen() }));
+
+    await user.click(screen.getByRole("button", { name: "Daveti kabul et" }));
+
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(UUID_RE);
+  });
+
+  it("network/retry AYNI key'i kullanır (gizli alan sıfırlansa da)", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(unavailable);
+    render(base({ action, generateIdempotencyKey: seqGen() }));
+
+    await user.click(screen.getByRole("button", { name: "Daveti kabul et" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Daveti kabul et" }));
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("farklı davet (yeni mount) yeni key kullanır", async () => {
+    const user = userEvent.setup();
+    const gen = seqGen();
+    const a = recording(unavailable);
+    const first = render(base({ action: a.action, generateIdempotencyKey: gen }));
+    await user.click(screen.getByRole("button", { name: "Daveti kabul et" }));
+    first.unmount();
+
+    const b = recording(unavailable);
+    render(base({ action: b.action, generateIdempotencyKey: gen }));
+    await user.click(screen.getByRole("button", { name: "Daveti kabul et" }));
+
+    expect(a.keys[0]).toMatch(UUID_RE);
+    expect(b.keys[0]).not.toBe(a.keys[0]);
+  });
+
+  it("key browser storage'a yazılmaz", async () => {
+    const user = userEvent.setup();
+    const { action, keys } = recording(unavailable);
+    render(base({ action, generateIdempotencyKey: seqGen() }));
+
+    await user.click(screen.getByRole("button", { name: "Daveti kabul et" }));
+
+    const key = keys[0] ?? "";
+    expect(key).toMatch(UUID_RE);
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
+    expect(document.cookie).not.toContain(key);
+  });
+});

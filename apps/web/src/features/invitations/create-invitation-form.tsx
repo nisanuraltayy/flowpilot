@@ -7,10 +7,18 @@
  * - Ham token YALNIZ `inviteUrl` içinde, modal AÇIKKEN gösterilir. Modal kapanınca
  *   (dismissed) URL artık render edilmez; log/analytics/storage'a hiç yazılmaz.
  * - Çift submit `SubmitButton` (useFormStatus) ile engellenir.
- * - Idempotency-Key ve token istemci storage'ına yazılmaz (server action üretir).
+ *
+ * Idempotency-Key yaşam döngüsü (istemci tarafı):
+ * - Mantıksal işlem = (e-posta + rol) payload fingerprint'i.
+ * - Key kısa ömürlü bir React ref'te tutulur (browser storage/URL/log DEĞİL). Key hassas
+ *   değildir (rastgele UUID, token DEĞİL); yalnız transport için gizli input'a yazılır.
+ * - Aynı payload'ın submit retry'ında AYNI key kullanılır (React'in hata sonrası uncontrolled
+ *   alanları sıfırlamasına rağmen: key ref sıfırlanmaz ve her submit'te onClick ile gizli
+ *   input'a yeniden yazılır). Payload DEĞİŞİRSE yeni key üretilir.
+ * - Başarılı işlem sonrası (modal kapanınca) key temizlenir → sonraki bağımsız davet yeni key alır.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useActionState } from "react";
 
 import { Alert } from "@/components/alert";
@@ -28,20 +36,59 @@ interface CreateInvitationFormProps {
     previous: CreateInvitationResult,
     formData: FormData,
   ) => Promise<CreateInvitationResult>;
+  /** Test edilebilirlik için enjekte edilebilir UUID üreteci (varsayılan: crypto.randomUUID). */
+  readonly generateIdempotencyKey?: () => string;
 }
 
-export function CreateInvitationForm({ action }: CreateInvitationFormProps) {
+export function CreateInvitationForm({
+  action,
+  generateIdempotencyKey = () => crypto.randomUUID(),
+}: CreateInvitationFormProps) {
   const [result, formAction] = useActionState(action, IDLE);
   // Kapatılan sonuç referansı: modal yalnız GÜNCEL success için açık kalır. Yeni davet
   // (yeni result nesnesi) modalı yeniden açar; kapatınca token'lı URL artık gösterilmez.
   const [closedResult, setClosedResult] = useState<CreateInvitationResult | null>(null);
-  const dismiss = () => setClosedResult(result);
+
+  // Idempotency-Key state (ref — form reset'ten etkilenmez).
+  const keyRef = useRef<string | null>(null);
+  const fingerprintRef = useRef<string | null>(null);
+  const keyInputRef = useRef<HTMLInputElement>(null);
+
+  // Submit'ten hemen önce (onClick) çalışır: payload fingerprint'ine göre key üretir/yeniden
+  // kullanır ve gizli input'a yazar. Aynı payload → aynı key; payload değişti → yeni key.
+  const prepareIdempotencyKey = () => {
+    const form = keyInputRef.current?.form ?? null;
+    const email = (form?.elements.namedItem("email") as HTMLInputElement | null)?.value ?? "";
+    const role = (form?.elements.namedItem("role") as HTMLSelectElement | null)?.value ?? "";
+    const fingerprint = `${email.trim().toLowerCase()}|${role}`;
+
+    if (keyRef.current === null || fingerprintRef.current !== fingerprint) {
+      keyRef.current = generateIdempotencyKey();
+      fingerprintRef.current = fingerprint;
+    }
+    if (keyInputRef.current !== null) {
+      keyInputRef.current.value = keyRef.current;
+    }
+  };
+
+  const dismiss = () => {
+    setClosedResult(result);
+    // Tamamlanmış işlemin key'ini temizle → sonraki bağımsız davet yeni key üretir.
+    keyRef.current = null;
+    fingerprintRef.current = null;
+    if (keyInputRef.current !== null) {
+      keyInputRef.current.value = "";
+    }
+  };
 
   const showSuccess = result.status === "success" && result !== closedResult;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
       <form action={formAction} className="flex flex-col gap-4" noValidate>
+        {/* Idempotency-Key transport'u: değeri onClick'te ref'ten yazılır (hassas değildir). */}
+        <input type="hidden" name="idempotencyKey" ref={keyInputRef} />
+
         {result.status === "error" ? <Alert tone="error">{result.message}</Alert> : null}
 
         <FormField
@@ -71,7 +118,9 @@ export function CreateInvitationForm({ action }: CreateInvitationFormProps) {
         </div>
 
         <div className="sm:max-w-[14rem]">
-          <SubmitButton pendingLabel="Davet oluşturuluyor…">Davet oluştur</SubmitButton>
+          <SubmitButton pendingLabel="Davet oluşturuluyor…" onClick={prepareIdempotencyKey}>
+            Davet oluştur
+          </SubmitButton>
         </div>
       </form>
 

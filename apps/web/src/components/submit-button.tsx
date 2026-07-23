@@ -14,6 +14,12 @@ interface SubmitButtonProps {
   readonly pendingLabel: string;
   readonly variant?: ButtonVariant;
   readonly fullWidth?: boolean;
+  /**
+   * Submit dispatch'inden ÖNCE (native click sırasında) senkron çalışır — ör. form
+   * serialize edilmeden önce gizli bir alanı doldurmak için (idempotency key). preventDefault
+   * ETMEZ; submit akışını değiştirmez.
+   */
+  readonly onClick?: () => void;
 }
 
 export function SubmitButton({
@@ -21,6 +27,7 @@ export function SubmitButton({
   pendingLabel,
   variant = "primary",
   fullWidth = true,
+  onClick,
 }: SubmitButtonProps) {
   const { pending } = useFormStatus();
 
@@ -29,6 +36,7 @@ export function SubmitButton({
       type="submit"
       disabled={pending}
       aria-busy={pending}
+      onClick={onClick}
       className={`${buttonClasses(variant, "md")} ${fullWidth ? "w-full" : ""}`}
     >
       {pending ? pendingLabel : children}

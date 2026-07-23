@@ -637,8 +637,17 @@ Format:
     DOM data-attribute'una, davet listesi response'una veya ham API debug çıktısına ASLA yazılmaz.
     (b) Davet URL'si create başarı modalında YALNIZ BİR KEZ gösterilir; modal kapanınca istemci
     state'inden düşer ve yeniden gösterilmez; idempotent replay (duplicate=true, token=null)
-    bağlantıyı yeniden ÜRETMEZ, güvenli bilgi mesajı gösterir. (c) Idempotency-Key her create/accept
-    submit'inde SERVER tarafında (randomUUID) üretilir; storage'a yazılmaz. (d) Public önizleme
+    bağlantıyı yeniden ÜRETMEZ, güvenli bilgi mesajı gösterir. (c) Idempotency-Key mantıksal işlem
+    başına İSTEMCİDE üretilir (kısa ömürlü React ref; storage/URL/log DEĞİL) ve AYNI mantıksal
+    işlemin retry'ında AYNI kalır — böylece kaybolan cevap/çift submit backend'de tek işlem olur.
+    Create için mantıksal işlem = (e-posta + rol) fingerprint'i: aynı payload retry → aynı key
+    (React'in hata sonrası uncontrolled alanları sıfırlamasına rağmen, key her submit'te onClick ile
+    gizli input'a yeniden yazılır), payload değişince → yeni key, başarı modalı kapanınca temizlenir.
+    Accept için mantıksal işlem = davet (org+token; mount başına sabit): retry aynı key, başarıdan
+    sonra temizlenir, farklı davet (yeni mount) → yeni key. Server tarafı gelen key'i UUID olarak
+    doğrular; eksik/biçimsiz ise güvenli fallback olarak üretir (her istekte daima geçerli key gider).
+    Key hassas değildir (rastgele UUID, token DEĞİL); yalnız transport için gizli input'a yazılır,
+    browser storage/cookie/URL/console/analytics/hata mesajına yazılmaz. (d) Public önizleme
     (`GET /v1/invitations/preview`) auth'suz çağrılır ve YALNIZ güvenli alanları gösterir
     (organizasyon adı, rol, son geçerlilik, durum); davet edilen e-posta, provider_subject,
     auth_provider veya JWT GÖSTERİLMEZ. E-posta uyuşmazlığında gerçek davetli e-postası ifşa
@@ -665,13 +674,19 @@ Format:
     Owner talimatı (2026-07-23): davet yönetimi + güvenli kabul frontend'i, token'ın URL + kısa
     ömürlü istemci state dışında hiçbir yerde tutulmaması, tek seferlik bağlantı gösterimi, relatif
     dönüş URL'si, önizlemede e-posta gizliliği ve frontend authz'ın UX-only olması onaylandı.
+    Takip (2026-07-24, owner talimatı): Idempotency-Key yaşam döngüsü incelendi ve düzeltildi —
+    key artık istemcide mantıksal işlem başına üretilip retry'da korunuyor (önceden her server-action
+    çağrısında yeniden üretiliyordu), başarıdan sonra temizleniyor; storage/URL/log'a yazılmıyor.
     Backend/migration DEĞİŞMEDİ; alembic head 0011; release_verify tüm kapılar yeşil.
   expires_at: 2026-12-01
   affected_stories: [FP-FE-001]
   binding_rule: >
     Ham davet token'ı yalnız davet URL'sinde (bir kez gösterilir) ve server-side şifreli bound
     argümanda bulunur; log/analytics/browser storage/error mesajı/query-cache key/DOM
-    data-attribute/liste response'una ASLA yazılmaz. Idempotency-Key server tarafında üretilir.
+    data-attribute/liste response'una ASLA yazılmaz. Idempotency-Key mantıksal işlem başına
+    istemcide üretilir ve retry'da AYNI kalır (create: e-posta+rol fingerprint; accept: davet/mount
+    sabit); başarıdan sonra temizlenir; storage/URL/log'a yazılmaz; server key'i UUID doğrular ve
+    eksik/biçimsizse güvenli fallback üretir.
     Public önizleme yalnız güvenli alanları döner (e-posta/provider_subject/auth_provider/JWT
     gösterilmez); e-posta uyuşmazlığında gerçek e-posta ifşa edilmez. Login dönüş yolu yalnız
     relatif uygulama-içi URL (open-redirect guard); başarılı kabulde token URL'den temizlenir.

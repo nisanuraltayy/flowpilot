@@ -9,9 +9,16 @@
  *   e-posta/token içermez.
  * - Başarılı kabulden sonra URL'deki org/token en erken güvenli anda temizlenir
  *   (history.replaceState) — kullanıcı başarı ekranını görmeye devam eder; refresh güvenli.
+ *
+ * Idempotency-Key yaşam döngüsü (istemci tarafı):
+ * - Mantıksal işlem = bu davet (org + token; mount başına sabit). Key kısa ömürlü bir React
+ *   ref'te tutulur (storage/URL/log DEĞİL) ve her submit'te onClick ile gizli input'a yazılır.
+ * - Network/retry AYNI key'i kullanır (ref sıfırlanmaz; React form reset'i önemsizdir çünkü
+ *   değer her submit'te ref'ten yeniden yazılır). Başarıdan sonra key temizlenir. Farklı davet
+ *   = farklı sayfa yüklemesi = yeni mount = yeni key.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useActionState } from "react";
 
 import { Alert } from "@/components/alert";
@@ -40,6 +47,8 @@ interface InvitationAcceptViewProps {
     previous: AcceptInvitationResult,
     formData: FormData,
   ) => Promise<AcceptInvitationResult>;
+  /** Test edilebilirlik için enjekte edilebilir UUID üreteci (varsayılan: crypto.randomUUID). */
+  readonly generateIdempotencyKey?: () => string;
 }
 
 const IDLE: AcceptInvitationResult = { status: "idle" };
@@ -59,11 +68,25 @@ export function InvitationAcceptView({
   loginHref,
   dashboardHref,
   action,
+  generateIdempotencyKey = () => crypto.randomUUID(),
 }: InvitationAcceptViewProps) {
   const [result, formAction] = useActionState(action, IDLE);
 
+  // Idempotency-Key (ref — form reset'ten etkilenmez). Bu davet için sabit; retry aynı key.
+  const keyRef = useRef<string | null>(null);
+  const keyInputRef = useRef<HTMLInputElement>(null);
+
+  const prepareIdempotencyKey = () => {
+    keyRef.current ??= generateIdempotencyKey();
+    if (keyInputRef.current !== null) {
+      keyInputRef.current.value = keyRef.current;
+    }
+  };
+
   useEffect(() => {
     if (result.status === "success") {
+      // Başarıdan sonra key'i temizle (tamamlanmış işlem).
+      keyRef.current = null;
       // Token'lı sorgu parametrelerini URL'den temizle (başarı ekranı görünmeye devam eder).
       try {
         window.history.replaceState(null, "", "/invitations/accept");
@@ -174,7 +197,11 @@ export function InvitationAcceptView({
           <ButtonLink href={loginHref}>Giriş yapıp kabul et</ButtonLink>
         ) : isAuthenticated ? (
           <form action={formAction}>
-            <SubmitButton pendingLabel="Kabul ediliyor…">Daveti kabul et</SubmitButton>
+            {/* Idempotency-Key transport'u: değeri onClick'te ref'ten yazılır (hassas değildir). */}
+            <input type="hidden" name="idempotencyKey" ref={keyInputRef} />
+            <SubmitButton pendingLabel="Kabul ediliyor…" onClick={prepareIdempotencyKey}>
+              Daveti kabul et
+            </SubmitButton>
           </form>
         ) : (
           <div className="flex flex-col gap-2">
