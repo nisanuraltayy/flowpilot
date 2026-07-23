@@ -2,9 +2,16 @@
 
 import type { ComponentType } from "react";
 
-import { DocumentsIcon, InboxIcon, OverviewIcon, PlusIcon, UsersIcon } from "@/components/icons";
+import {
+  DocumentsIcon,
+  InboxIcon,
+  MemberIcon,
+  OverviewIcon,
+  PlusIcon,
+  UsersIcon,
+} from "@/components/icons";
 
-export type NavKey = "overview" | "new" | "requests" | "inbox" | "invitations";
+export type NavKey = "overview" | "new" | "requests" | "inbox" | "members" | "invitations";
 
 export interface NavItem {
   readonly key: NavKey;
@@ -20,6 +27,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { key: "new", href: "/purchase-requests/new", label: "Yeni Talep", Icon: PlusIcon },
   { key: "requests", href: "/purchase-requests", label: "Taleplerim", Icon: DocumentsIcon },
   { key: "inbox", href: "/tasks/inbox", label: "Onay Kutusu", Icon: InboxIcon },
+  {
+    key: "members",
+    href: "/settings/team/members",
+    label: "Üyeler",
+    Icon: MemberIcon,
+    requiresManage: true,
+  },
   {
     key: "invitations",
     href: "/settings/team/invitations",

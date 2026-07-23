@@ -11,11 +11,20 @@ describe("visibleNavItems", () => {
     expect(visibleNavItems(true)).toHaveLength(NAV_ITEMS.length);
   });
 
-  it("member için Davetler gizlenir; temel öğeler kalır", () => {
+  it("member için yönetim öğeleri (Üyeler/Davetler) gizlenir; temel öğeler kalır", () => {
     const items = visibleNavItems(false);
     const keys = items.map((i) => i.key);
     expect(keys).not.toContain("invitations");
+    expect(keys).not.toContain("members");
     expect(keys).toEqual(["overview", "new", "requests", "inbox"]);
+  });
+
+  it("yönetici için Üyeler bağlantısı görünür ve doğru yola gider", () => {
+    const keys = visibleNavItems(true).map((i) => i.key);
+    expect(keys).toContain("members");
+    const members = NAV_ITEMS.find((i) => i.key === "members");
+    expect(members?.requiresManage).toBe(true);
+    expect(members?.href).toBe("/settings/team/members");
   });
 
   it("Davetler öğesi requiresManage ile işaretlidir ve doğru yola gider", () => {

@@ -99,6 +99,16 @@ export function UsersIcon({ className }: IconProps) {
   );
 }
 
+export function MemberIcon({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <circle cx="9" cy="8" r="3.25" />
+      <path d="M3.5 20v-1.5A4.5 4.5 0 0 1 8 14h2a4.5 4.5 0 0 1 4.5 4.5V20" />
+      <path d="m16.5 12 1.6 1.6 3-3" />
+    </svg>
+  );
+}
+
 export function BuildingIcon({ className }: IconProps) {
   return (
     <svg {...base(className)}>

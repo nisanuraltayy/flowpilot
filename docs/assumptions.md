@@ -693,4 +693,57 @@ Format:
     Frontend görünürlük UX-only, backend authorization tek kaynak (member 403, cross-tenant 404).
     E-posta teslimi ve diğer yönetim ekranları kapsam dışıdır.
   reference: apps/web/src/features/invitations/actions.ts
+
+- id: ASM-0024
+  statement: >
+    Organizasyon üye yönetimi arayüzü (FP-FE-002, frontend dilim) güvenlik ve kapsam kararları.
+    Backend/migration/alembic head (0011) DEĞİŞMEDİ; frontend yalnız mevcut sözleşmeleri tüketir:
+    GET /v1/organizations/{id}/members ve PATCH .../members/{user_id} (body: role?/status?/
+    expected_version → response: membership_id/user_id/role/status/version/duplicate). (a) Frontend
+    rol/görünürlük (Ayarlar → Ekip → Üyeler menüsü, owner/admin gate, satır-bazlı aksiyon
+    görünürlüğü) YALNIZ UX içindir; backend authorization TEK karar kaynağıdır ve frontend bunu
+    bypass etmeye çalışmaz. member kullanıcı ekranı kullanamaz (403 güvenli mesaj), non-member/
+    cross-tenant kaynak sızdırmadan 404 gösterilir. (b) Owner kendisi dışındaki herkesi yönetir
+    (owner/admin/member rol; son-owner değilse owner düşürme; suspend/reactivate/remove). Admin
+    YALNIZ member hedefleri yönetir, member'ı admin yapabilir, owner rolü VEREMEZ, owner/admin
+    hedefte işlem yapamaz. Self satırda hiçbir mutasyon aksiyonu sunulmaz (açıklamalı); self tespiti
+    frontend'de e-posta eşleşmesiyle yapılır (best-effort UX — backend `/me` FlowPilot user_id
+    döndürmüyor; gerçek self-mutation engeli backend'de 409). (c) Removed üyelik TERMİNAL gösterilir:
+    satır listede kalır ama rol/durum aksiyonu sunulmaz; reactivate removed'da gösterilmez.
+    (d) Mutasyonlar optimistic concurrency (expected_version, güncel satırdan) ile yapılır. 409
+    stale conflict OTOMATİK ve körlemesine retry EDİLMEZ: liste yeniden fetch edilir (revalidatePath),
+    açık modalda resubmit engellenir, kullanıcı güncel version'ı görüp kararı tekrar verir. (e) Backend
+    TÜM iş çakışmalarını 409 + ham Türkçe domain detay'ı ile döndürür; ham detay KULLANICIYA
+    GÖSTERİLMEZ. Frontend ham detay'ı ayırt edici kararlı belirteçlerle güvenli sabit mesajlara eşler
+    (stale / self / son-owner / onay-sorumluluğu / removed / geçersiz-geçiş); sınıflandırılamayan 409
+    güvenli genel çakışma mesajı alır. Bu, backend contract'ının makine-okunur 409 kodu içermemesine
+    karşı bilinçli frontend adaptasyonudur (backend workaround DEĞİL). (f) No-op mutasyon (duplicate=
+    true) güvenli "değişiklik yapılmadı" mesajıyla gösterilir; kullanıcının seçemeyeceği roller
+    dropdown'da hiç sunulmaz (owner admin'e owner seçeneği görünmez), no-op rol submit'i engellenir.
+    (g) Güvenlik: provider_subject/auth_provider/JWT frontend tiplerine/DOM'a alınmaz; ham backend
+    response console.log/analytics/error mesajına basılmaz; üye listesi ve target user_id browser
+    storage'a yazılmaz (yalnız request transport). (h) Approval-role yönetimi, blocked-task yönetimi
+    ve e-posta teslimi bu dilimde YOK (sonraki frontend dilimleri). Yeni state-yönetimi/UI kütüphanesi
+    eklenmedi; mevcut tasarım dili korundu.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner talimatı (2026-07-24): üye yönetimi frontend'i (listeleme, rol değiştirme, suspend/
+    reactivate/remove), expected_version optimistic concurrency, stale conflict'in otomatik retry
+    edilmemesi, removed terminal gösterimi, self-mutation aksiyonlarının sunulmaması, son-owner ve
+    onay-sorumluluğu çakışmalarının güvenli mesajlarla gösterilmesi ve frontend authz'ın UX-only
+    olması onaylandı. Backend/migration DEĞİŞMEDİ; alembic head 0011; release_verify tüm kapılar yeşil.
+  expires_at: 2026-12-01
+  affected_stories: [FP-FE-002]
+  binding_rule: >
+    Üye yönetimi frontend görünürlüğü UX-only'dir; backend authorization tek karar kaynağıdır
+    (member 403, cross-tenant 404, self/son-owner/onay-sorumluluğu backend'de 409). Mutasyonlar
+    expected_version ile yapılır; stale 409 otomatik retry edilmez (liste tazelenir, kullanıcı
+    yeniden karar verir). Backend 409 ham detay'ı kullanıcıya gösterilmez; güvenli sabit mesajlara
+    sınıflandırılır (bilinmeyen → genel çakışma). Removed üyelik terminaldir (aksiyon yok). Hassas
+    identity (provider_subject/auth_provider/JWT) gösterilmez/loglanmaz; üye listesi ve target
+    user_id browser storage'a yazılmaz. Approval-role/blocked-task/e-posta teslimi kapsam dışıdır.
+  reference: apps/web/src/features/members/actions.ts
 ```

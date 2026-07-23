@@ -38,7 +38,7 @@ type RawResult =
   | ApiFailure;
 
 interface RequestOptions {
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PATCH";
   readonly path: string;
   /** Bearer token — atlanırsa PUBLIC istek yapılır (Authorization header eklenmez). */
   readonly accessToken?: string;
