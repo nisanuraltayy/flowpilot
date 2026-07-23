@@ -3,6 +3,7 @@
 import type { ComponentType } from "react";
 
 import {
+  ApprovalRoleIcon,
   DocumentsIcon,
   InboxIcon,
   MemberIcon,
@@ -11,7 +12,14 @@ import {
   UsersIcon,
 } from "@/components/icons";
 
-export type NavKey = "overview" | "new" | "requests" | "inbox" | "members" | "invitations";
+export type NavKey =
+  | "overview"
+  | "new"
+  | "requests"
+  | "inbox"
+  | "members"
+  | "invitations"
+  | "approval-roles";
 
 export interface NavItem {
   readonly key: NavKey;
@@ -39,6 +47,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/settings/team/invitations",
     label: "Davetler",
     Icon: UsersIcon,
+    requiresManage: true,
+  },
+  {
+    key: "approval-roles",
+    href: "/settings/team/approval-roles",
+    label: "Onay Rolleri",
+    Icon: ApprovalRoleIcon,
     requiresManage: true,
   },
 ];

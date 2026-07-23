@@ -209,6 +209,33 @@ const updatedMemberSchema = z.object({
   duplicate: z.boolean(),
 });
 
+// -------------------------------------------------------- onay rolü şemaları
+
+const approvalRoleAssignmentsSchema = z.object({
+  items: z.array(
+    z.object({
+      assignment_id: uuid,
+      role_key: z.string(),
+      assigned_user_id: uuid,
+      assigned_user_email: nullableString,
+      status: z.string(),
+      version: z.number().int().nonnegative(),
+      created_at: timestamp,
+      updated_at: timestamp,
+    }),
+  ),
+});
+
+const assignedApprovalRoleSchema = z.object({
+  assignment_id: uuid,
+  role_key: z.string(),
+  assigned_user_id: uuid,
+  assigned_user_email: nullableString,
+  status: z.string(),
+  version: z.number().int().nonnegative(),
+  duplicate: z.boolean(),
+});
+
 // ---------------------------------------------------------------- domain tipleri
 
 export interface MyOrganization {
@@ -383,6 +410,33 @@ export interface UpdateMemberInput {
   readonly role?: string;
   readonly status?: string;
   readonly expectedVersion: number;
+}
+
+export interface ApprovalRoleAssignment {
+  readonly assignmentId: string;
+  readonly roleKey: string;
+  readonly assignedUserId: string;
+  readonly assignedUserEmail: string | null;
+  readonly status: string;
+  readonly version: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface AssignedApprovalRole {
+  readonly assignmentId: string;
+  readonly roleKey: string;
+  readonly assignedUserId: string;
+  readonly assignedUserEmail: string | null;
+  readonly status: string;
+  readonly version: number;
+  readonly duplicate: boolean;
+}
+
+export interface AssignApprovalRoleInput {
+  readonly userId: string;
+  /** Mevcut aktif atama varsa zorunlu; ilk atamada omit (backend null kabul eder). */
+  readonly expectedVersion?: number;
 }
 
 // -------------------------------------------------------------------- fonksiyonlar
@@ -710,6 +764,59 @@ export async function updateOrganizationMember(
     membershipId: value.membership_id,
     userId: value.user_id,
     role: value.role,
+    status: value.status,
+    version: value.version,
+    duplicate: value.duplicate,
+  }));
+}
+
+// ---------------------------------------------------- onay rolü fonksiyonları
+
+export async function listApprovalRoleAssignments(
+  accessToken: string,
+  organizationId: string,
+): Promise<ApiOutcome<readonly ApprovalRoleAssignment[]>> {
+  const raw = await apiRequest({
+    method: "GET",
+    path: `${orgBase(organizationId)}/approval-roles`,
+    accessToken,
+  });
+  return parseOk(raw, approvalRoleAssignmentsSchema, (value) =>
+    value.items.map((item) => ({
+      assignmentId: item.assignment_id,
+      roleKey: item.role_key,
+      assignedUserId: item.assigned_user_id,
+      assignedUserEmail: item.assigned_user_email,
+      status: item.status,
+      version: item.version,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    })),
+  );
+}
+
+export async function assignApprovalRole(
+  accessToken: string,
+  organizationId: string,
+  roleKey: string,
+  input: AssignApprovalRoleInput,
+): Promise<ApiOutcome<AssignedApprovalRole>> {
+  // expected_version YALNIZ mevcut aktif atama varsa gönderilir (ilk atamada omit).
+  const body: Record<string, unknown> = { user_id: input.userId };
+  if (input.expectedVersion !== undefined) {
+    body.expected_version = input.expectedVersion;
+  }
+  const raw = await apiRequest({
+    method: "PUT",
+    path: `${orgBase(organizationId)}/approval-roles/${roleKey}`,
+    accessToken,
+    body,
+  });
+  return parseOk(raw, assignedApprovalRoleSchema, (value) => ({
+    assignmentId: value.assignment_id,
+    roleKey: value.role_key,
+    assignedUserId: value.assigned_user_id,
+    assignedUserEmail: value.assigned_user_email,
     status: value.status,
     version: value.version,
     duplicate: value.duplicate,

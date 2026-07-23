@@ -109,6 +109,15 @@ export function MemberIcon({ className }: IconProps) {
   );
 }
 
+export function ApprovalRoleIcon({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <path d="M12 3 5 6v5c0 4 2.8 6.5 7 8 4.2-1.5 7-4 7-8V6z" />
+      <path d="m9.2 11.5 1.8 1.8 3.6-3.6" />
+    </svg>
+  );
+}
+
 export function BuildingIcon({ className }: IconProps) {
   return (
     <svg {...base(className)}>
