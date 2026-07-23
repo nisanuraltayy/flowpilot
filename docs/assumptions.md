@@ -624,4 +624,58 @@ Format:
     DELETE yok. Owner/admin blocked görür ve çözer (merkezi permission; route'ta dağınık rol
     kontrolü yok). Self-approval prevention frontend'i sonraki dilimdedir.
   reference: apps/backend/src/flowpilot/modules/workflow_runtime/application/service.py
+
+- id: ASM-0023
+  statement: >
+    Organizasyon davet yönetimi ve güvenli davet kabul arayüzü (FP-FE-001, frontend dilim)
+    güvenlik ve kapsam kararları. Backend/migration/alembic head (0011) DEĞİŞMEDİ; frontend
+    yalnız mevcut davet/önizleme/kabul sözleşmelerini tüketir. (a) Ham davet token'ı bir
+    CAPABILITY'dir ve YALNIZ iki güvenli taşıyıcıda bulunur: (1) create sonucunda bir kez
+    gösterilen davet URL'sinin query parametresi, (2) kabul akışında server tarafında şifreli
+    bound server-action argümanı. Token console.log'a, analytics event'ine, tarayıcı storage'ına
+    (localStorage/sessionStorage/cookie), error boundary mesajına, React Query/devtools key'ine,
+    DOM data-attribute'una, davet listesi response'una veya ham API debug çıktısına ASLA yazılmaz.
+    (b) Davet URL'si create başarı modalında YALNIZ BİR KEZ gösterilir; modal kapanınca istemci
+    state'inden düşer ve yeniden gösterilmez; idempotent replay (duplicate=true, token=null)
+    bağlantıyı yeniden ÜRETMEZ, güvenli bilgi mesajı gösterir. (c) Idempotency-Key her create/accept
+    submit'inde SERVER tarafında (randomUUID) üretilir; storage'a yazılmaz. (d) Public önizleme
+    (`GET /v1/invitations/preview`) auth'suz çağrılır ve YALNIZ güvenli alanları gösterir
+    (organizasyon adı, rol, son geçerlilik, durum); davet edilen e-posta, provider_subject,
+    auth_provider veya JWT GÖSTERİLMEZ. E-posta uyuşmazlığında gerçek davetli e-postası ifşa
+    edilmez; sabit "Bu davet farklı bir e-posta adresi için oluşturulmuş." mesajı gösterilir.
+    (e) Kabul için giriş gereken kullanıcı login'e yönlendirilirken dönüş yolu YALNIZ uygulama-içi
+    RELATİF URL olarak (open-redirect guard: `//`, `/\`, mutlak URL reddedilir) taşınır; token
+    login akışında storage'a değil, yalnız URL query'sinde kalır. Başarılı kabulden sonra org/token
+    query'si `history.replaceState` ile en erken güvenli anda URL'den temizlenir (başarı ekranı
+    görünmeye devam eder; refresh güvenli). (f) Frontend rol/görünürlük (Ayarlar → Ekip → Davetler
+    menüsü ve owner/admin gate) YALNIZ UX içindir; backend authorization tek kaynaktır. member
+    davet ekranında güvenli "yetkiniz yok" görür (403), non-member/cross-tenant sızıntı olmaz (404).
+    Davet oluşturmada rol yalnız admin|member seçilebilir (owner SUNULMAZ). (g) HTTP eşlemesi
+    kullanıcıya güvenli: 401 → giriş, 403 → yetkisiz/e-posta uyuşmazlığı, 404 → geçersiz davet,
+    409 → çakışma (idempotent tekrar güvenli), 410 → süresi dolmuş, 422 → doğrulama, 5xx/ağ → tekrar
+    dene; backend teknik detayı (stack, FastAPI 422 dizisi) kullanıcıya taşınmaz. (h) E-posta teslimi
+    KAPSAM DIŞIDIR (bağlantı elle paylaşılır); üye yönetimi, approval-role yönetimi ve blocked-task
+    yönetimi frontend'i bu dilimde YOK (sonraki dilim/ler). Yeni state-yönetimi/UI kütüphanesi
+    eklenmedi; mevcut tasarım dili korundu.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner talimatı (2026-07-23): davet yönetimi + güvenli kabul frontend'i, token'ın URL + kısa
+    ömürlü istemci state dışında hiçbir yerde tutulmaması, tek seferlik bağlantı gösterimi, relatif
+    dönüş URL'si, önizlemede e-posta gizliliği ve frontend authz'ın UX-only olması onaylandı.
+    Backend/migration DEĞİŞMEDİ; alembic head 0011; release_verify tüm kapılar yeşil.
+  expires_at: 2026-12-01
+  affected_stories: [FP-FE-001]
+  binding_rule: >
+    Ham davet token'ı yalnız davet URL'sinde (bir kez gösterilir) ve server-side şifreli bound
+    argümanda bulunur; log/analytics/browser storage/error mesajı/query-cache key/DOM
+    data-attribute/liste response'una ASLA yazılmaz. Idempotency-Key server tarafında üretilir.
+    Public önizleme yalnız güvenli alanları döner (e-posta/provider_subject/auth_provider/JWT
+    gösterilmez); e-posta uyuşmazlığında gerçek e-posta ifşa edilmez. Login dönüş yolu yalnız
+    relatif uygulama-içi URL (open-redirect guard); başarılı kabulde token URL'den temizlenir.
+    Frontend görünürlük UX-only, backend authorization tek kaynak (member 403, cross-tenant 404).
+    E-posta teslimi ve diğer yönetim ekranları kapsam dışıdır.
+  reference: apps/web/src/features/invitations/actions.ts
 ```
