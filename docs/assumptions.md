@@ -746,4 +746,60 @@ Format:
     identity (provider_subject/auth_provider/JWT) gösterilmez/loglanmaz; üye listesi ve target
     user_id browser storage'a yazılmaz. Approval-role/blocked-task/e-posta teslimi kapsam dışıdır.
   reference: apps/web/src/features/members/actions.ts
+
+- id: ASM-0025
+  statement: >
+    Onay rolü yönetimi arayüzü (FP-FE-003, frontend dilim) güvenlik ve kapsam kararları.
+    Backend/migration/alembic head (0011) DEĞİŞMEDİ; frontend yalnız mevcut sözleşmeleri tüketir:
+    GET /v1/organizations/{id}/approval-roles (aktif atamalar: assignment_id/role_key/
+    assigned_user_id/assigned_user_email/status/version/created_at/updated_at) ve PUT
+    .../approval-roles/{role_key} (body: user_id + expected_version?; response: +duplicate).
+    (a) Approval role_key seti workflow onay sorumluluklarıdır (team_manager → Takım Yöneticisi,
+    finance → Finans Sorumlusu, general_manager → Genel Müdür) ve org-yönetişim rolünden
+    (owner/admin/member) AYRIDIR. Sabit 3 rol için kart gösterilir; her kartta mevcut atanan
+    kullanıcı veya "atanmadı". (b) Görünürlük UX-only; backend policy TEK karar kaynağıdır
+    (APPROVAL_ROLE_ASSIGNMENT_READ/CHANGE → owner VE admin; member 403; non-member/cross-tenant
+    404). Sayfa owner/admin gate'lidir (member güvenli 403 ekranı görür). (c) Adaylar YALNIZ AKTİF
+    üyelerdir (suspended/removed atanamaz — backend 409). Bir kullanıcı birden fazla onay rolü
+    taşıyabilir (backend destekler) → frontend başka rol taşıyor diye adayı ELEMEZ. Self-assignment
+    bu dilimde YASAK DEĞİLDİR (self-approval engeli karar anında blocked-task ile ayrı dilimdedir).
+    (d) Atama PUT ile rol-bazlıdır (toplu değil). Optimistic concurrency: mevcut aktif atama varsa
+    expected_version gönderilir; ilk atamada gönderilmez (backend'in expected_version-required 422'si
+    frontend'de stale-refresh olarak sınıflandırılır). Stale 409 OTOMATİK retry EDİLMEZ: liste
+    revalidatePath ile yenilenir, açık modalda resubmit engellenir, kullanıcı güncel version ile
+    yeniden karar verir. (e) No-op (mevcut kullanıcıyı tekrar seçmek) submit edilemez; seçim
+    yapılmadan submit edilemez; duplicate=true güvenli "zaten atanmış" mesajıyla gösterilir.
+    (f) Backend 409/422 ham detay'ı KULLANICIYA GÖSTERİLMEZ; kararlı belirteçlerle güvenli sabit
+    mesajlara sınıflandırılır (stale / geçersiz-üye-durumu / geçersiz-rol / genel). (g) Task pinning:
+    atama değişikliği MEVCUT açık onay görevlerini DEĞİŞTİRMEZ; yalnız yeni oluşturulacak görevler
+    yeni atamayı kullanır (backend garantisi). UI mevcut görevleri "yeniden atandı" gibi göstermez ve
+    toplu görev taşıma iddiasında bulunmaz. (h) Backend REMOVE/DELETE endpoint'i YOKTUR → kaldır
+    butonu oluşturulmadı. (i) Güvenlik: provider_subject/auth_provider/JWT frontend tiplerine/DOM'a
+    alınmaz; ham backend response console.log/analytics/error mesajına basılmaz; atama/üye listesi ve
+    target user_id browser storage'a yazılmaz. (j) Bu dilim yalnız approval-role configuration UI'dır;
+    blocked-task resolve UI sonraki frontend dilimidir; üye suspend/remove FP-FE-002 içindedir;
+    e-posta teslimi ve hosting kapsam dışıdır. Yeni state-yönetimi/UI kütüphanesi eklenmedi.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Owner talimatı (2026-07-24): onay rolü yönetimi frontend'i (3 sabit rol kartı, aktif-üye
+    adayları, rol-bazlı PUT atama, optimistic concurrency, stale'in otomatik retry edilmemesi,
+    no-op engeli, task pinning gösterimi, remove endpoint'i olmadığı için kaldır butonu olmaması)
+    ve frontend authz'ın UX-only olması onaylandı. Backend/migration DEĞİŞMEDİ; alembic head 0011;
+    release_verify tüm kapılar yeşil.
+  expires_at: 2026-12-01
+  affected_stories: [FP-FE-003]
+  binding_rule: >
+    Onay rolü yönetimi frontend görünürlüğü UX-only'dir; backend policy tek karar kaynağıdır
+    (owner/admin yönetir, member 403, cross-tenant 404). Adaylar yalnız aktif üyelerdir; bir
+    kullanıcı birden fazla onay rolü taşıyabilir. Atama rol-bazlı PUT + optimistic expected_version
+    (ilk atamada omit) ile yapılır; stale 409 otomatik retry edilmez. No-op/duplicate güvenli
+    gösterilir. Backend 409/422 ham detay'ı gösterilmez; güvenli sabit mesajlara sınıflandırılır.
+    Mevcut açık görevler pinlenir (yeniden atanmaz); yalnız yeni görevler yeni atamayı kullanır.
+    Remove endpoint'i olmadığı için kaldır butonu yoktur. Hassas identity gösterilmez/loglanmaz;
+    atama/üye verisi ve target user_id browser storage'a yazılmaz. Blocked-task resolve UI, üye
+    yönetimi, e-posta teslimi ve hosting kapsam dışıdır.
+  reference: apps/web/src/features/approval-roles/actions.ts
 ```
