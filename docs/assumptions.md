@@ -237,14 +237,16 @@ Format:
     oluşturulduğunda assignee task'a SABİTLENİR; sonraki rol değişikliği açık task'ları
     etkilemez. (d) Karar yetkisi YALNIZ task'ın assigned_user_id'sine eşit kullanıcıdadır.
     (e) SELF-APPROVAL SERBEST: requester kendi adımını onaylayabilir.
+        **SUPERSEDED by ASM-0022 (FP-E06-009, 2026-07-21): self-approval artık YASAKTIR ve
+        varsayılan açıktır; (e) maddesi geçersizdir. (a)-(d) yürürlükte kalır.**
   impact: high
   reversible: true
   owner: product
-  status: validated
+  status: superseded
   validation_method: >
     Owner kararı: tek kullanıcının tüm workflow'u uçtan uca test edebilmesi için MVP'de
-    self-approval'a izin verilir. Bu GEÇİCİ bir ÜRÜN kararıdır, güvenlik açığı DEĞİLDİR;
-    separation-of-duties pilot öncesine ertelenmiştir.
+    self-approval'a GEÇİCİ olarak izin verilmişti. Bu geçici izin FP-E06-009 ile KALDIRILDI
+    (ASM-0022); separation-of-duties artık sabit ve kapatılamaz bir güvenlik kuralıdır.
   expires_at: 2026-12-01
   affected_stories: [FP-E10-001, FP-E10-002, FP-E10-003]
   binding_rule: >
@@ -564,4 +566,62 @@ Format:
     çekirdeğidir. E09 kapsamdadır ve teyit edilmiştir.
     Bkz. docs/product/mvp-scope-v0.1.md §2.
   affected_stories: [FP-E09-001, FP-E09-002, FP-E09-003, FP-E09-004, FP-E09-005]
+
+- id: ASM-0022
+  statement: >
+    Kendi talebini onaylamayı engelleme + uygun onaycı bekleme (FP-E06-009) owner-approved
+    kuralları — ASM-0016(e)'yi SÜPERSE eder. (a) Self-approval BÜTÜN tenant'larda YASAKTIR,
+    SABİTTİR ve VARSAYILAN AÇIKTIR: organizasyon ayarı veya kapatma seçeneği YOKTUR. Talep
+    sahibi (request_created_by / workflow instance context'teki requester_id) kendi talebindeki
+    HİÇBİR onay adımını sonuçlandıramaz; başka governance/approval rolü taşısa ya da ilgili
+    role_key'e atanmış olsa bile. (b) Atama davranışı: bir adımın oluşturma-anındaki çözülen
+    assignee'si talep sahibiyse görev talep sahibine ATANMAZ (assigned_user_id null kalır),
+    approver_role korunur ve adım sırası kendisine geldiğinde `blocked` (NON-terminal) olur;
+    `blocked_reason = self_approval_no_eligible_assignee`, talep sahibinin inbox'ında GÖRÜNMEZ.
+    Sonraki bir adım talep sahibine çözülüyorsa önceki adımlar normal ilerler, sıra o adıma
+    gelince workflow blocked olur ve DAHA İLERİ İLERLEMEZ; önceki tamamlanmış görevler
+    değişmez. Sessiz owner/requester fallback YOKTUR. (c) Karar anı savunması (defense-in-depth):
+    assignee snapshot'ı yanlışlıkla requester olsa (legacy/veri uyumsuzluğu) veya doğrudan API
+    çağrısı yapılsa bile decision path reddedilir — task state/decision/workflow DEĞİŞMEZ,
+    HTTP 409 döner ve güvenlik denial audit'i (`approval.self_approval_blocked`) yazılır; blocked
+    task approve/reject EDİLEMEZ. (d) Dar kapsamlı çözümleme: yalnız self-approval nedeniyle
+    blocked kalan MEVCUT adım için `resolve-assignment` endpoint'i vardır (GENEL açık-task
+    reassignment DEĞİL). Aday keyfi user_id DEĞİL, o rolün MEVCUT aktif approval_role_assignment'ı
+    kaynak alınır; aday aynı organizasyonda aktif üye olmalı ve talep sahibi OLMAMALIDIR; uygun
+    aday yoksa 409 ve state değişmez; başarılıysa blocked→active, assigned_user_id yeni kullanıcı,
+    blocked_reason temizlenir, version+1, audit (`approval.task_assignment_resolved`). Normal
+    active/pending task'lar TOPLU yeniden atanmaz; snapshot/pinning invariant'ı korunur. (e)
+    Görünürlük: owner/admin blocked task'ları listeler (`approval.blocked_task.read`) ve çözer
+    (`approval.blocked_task.resolve`); member 403, non-member/cross-tenant 404. Blocked durumu API
+    ve audit üzerinden açıkça görünür; instance running/waiting, purchase request in_approval
+    kalır (yeni instance/PR status EKLENMEDİ). (f) Eşzamanlılık: iki resolve yarışında task satırı
+    FOR UPDATE + version CAS ile tek kazanır; role-change ile resolve yarışında aday hep aktif üye
+    + non-requester; requester karar ile resolve yarışında requester ASLA kazanamaz, workflow bir
+    kez ilerler, çift audit/decision oluşmaz. (g) Bloklama/çözümleme/ret olayları audit'te görünür
+    (`approval.task_blocked` / `approval.task_assignment_resolved` / `approval.self_approval_blocked`);
+    JWT/token/hassas identity audit'e YAZILMAZ; no-op/başarısız resolve yeni başarılı-state audit'i
+    üretmez. (h) Frontend blocked-task yönetimi SONRAKİ dilimdedir.
+  impact: high
+  reversible: false
+  owner: product
+  status: validated
+  supersedes: [ASM-0016]
+  validation_method: >
+    Owner kararı (2026-07-21): self-approval kalıcı olarak yasaklandı ve varsayılan açık,
+    kapatılamaz güvenlik kuralı oldu. Uygun onaycı yoksa görev blocked olur; sessiz fallback yok.
+    Additive migration 0011 (0001–0010 immutable): workflow_runtime_tasks status CHECK'e `blocked`,
+    `blocked_reason`/`blocked_at` nullable kolonları + reason CHECK, (tenant_id, status) index.
+    Instance/PR status'una yeni değer eklenmedi (blocked task-seviyesinde temsil edilir).
+  expires_at: 2026-12-01
+  affected_stories: [FP-E06-009]
+  binding_rule: >
+    Self-approval bütün tenant'larda yasaktır, kapatılamaz ve varsayılan açıktır (gizli flag /
+    istisna YOK). Uygun onaycı yoksa görev talep sahibine verilmez; blocked olur ve inbox'ta
+    görünmez. Karar anı savunması requester'ı her koşulda reddeder (409 + security audit; state
+    değişmez). Yalnız self-approval nedeniyle blocked kalan adım, mevcut aktif role assignment'tan
+    alınan uygun (aktif üye, non-requester) kullanıcıya resolve edilir; normal açık task'lar toplu
+    yeniden atanmaz ve pinning invariant'ı korunur. blocked task approve/reject edilemez; fiziksel
+    DELETE yok. Owner/admin blocked görür ve çözer (merkezi permission; route'ta dağınık rol
+    kontrolü yok). Self-approval prevention frontend'i sonraki dilimdedir.
+  reference: apps/backend/src/flowpilot/modules/workflow_runtime/application/service.py
 ```
