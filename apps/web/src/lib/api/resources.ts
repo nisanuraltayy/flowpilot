@@ -183,6 +183,32 @@ const acceptedInvitationSchema = z.object({
   duplicate: z.boolean(),
 });
 
+// -------------------------------------------------------------- üye şemaları
+
+const membersSchema = z.object({
+  items: z.array(
+    z.object({
+      membership_id: uuid,
+      user_id: uuid,
+      email: nullableString,
+      role: z.string(),
+      status: z.string(),
+      version: z.number().int().nonnegative(),
+      created_at: timestamp,
+      updated_at: timestamp,
+    }),
+  ),
+});
+
+const updatedMemberSchema = z.object({
+  membership_id: uuid,
+  user_id: uuid,
+  role: z.string(),
+  status: z.string(),
+  version: z.number().int().nonnegative(),
+  duplicate: z.boolean(),
+});
+
 // ---------------------------------------------------------------- domain tipleri
 
 export interface MyOrganization {
@@ -330,6 +356,33 @@ export interface AcceptInvitationInput {
   readonly organizationId: string;
   readonly token: string;
   readonly idempotencyKey: string;
+}
+
+export interface MemberListItem {
+  readonly membershipId: string;
+  readonly userId: string;
+  readonly email: string | null;
+  readonly role: string;
+  readonly status: string;
+  readonly version: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface UpdatedMember {
+  readonly membershipId: string;
+  readonly userId: string;
+  readonly role: string;
+  readonly status: string;
+  readonly version: number;
+  readonly duplicate: boolean;
+}
+
+export interface UpdateMemberInput {
+  /** role veya status'tan en az biri verilmeli; expected_version zorunlu (optimistic). */
+  readonly role?: string;
+  readonly status?: string;
+  readonly expectedVersion: number;
 }
 
 // -------------------------------------------------------------------- fonksiyonlar
@@ -604,6 +657,61 @@ export async function acceptInvitation(
     membershipId: value.membership_id,
     role: value.role,
     status: value.status,
+    duplicate: value.duplicate,
+  }));
+}
+
+// -------------------------------------------------------------- üye fonksiyonları
+
+export async function listOrganizationMembers(
+  accessToken: string,
+  organizationId: string,
+): Promise<ApiOutcome<readonly MemberListItem[]>> {
+  const raw = await apiRequest({
+    method: "GET",
+    path: `${orgBase(organizationId)}/members`,
+    accessToken,
+  });
+  return parseOk(raw, membersSchema, (value) =>
+    value.items.map((item) => ({
+      membershipId: item.membership_id,
+      userId: item.user_id,
+      email: item.email,
+      role: item.role,
+      status: item.status,
+      version: item.version,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    })),
+  );
+}
+
+export async function updateOrganizationMember(
+  accessToken: string,
+  organizationId: string,
+  targetUserId: string,
+  input: UpdateMemberInput,
+): Promise<ApiOutcome<UpdatedMember>> {
+  // Yalnız verilen alanlar gönderilir (role veya status); expected_version daima gider.
+  const body: Record<string, unknown> = { expected_version: input.expectedVersion };
+  if (input.role !== undefined) {
+    body.role = input.role;
+  }
+  if (input.status !== undefined) {
+    body.status = input.status;
+  }
+  const raw = await apiRequest({
+    method: "PATCH",
+    path: `${orgBase(organizationId)}/members/${targetUserId}`,
+    accessToken,
+    body,
+  });
+  return parseOk(raw, updatedMemberSchema, (value) => ({
+    membershipId: value.membership_id,
+    userId: value.user_id,
+    role: value.role,
+    status: value.status,
+    version: value.version,
     duplicate: value.duplicate,
   }));
 }
