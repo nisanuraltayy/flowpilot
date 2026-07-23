@@ -32,4 +32,12 @@ describe("visibleNavItems", () => {
     expect(invitations?.requiresManage).toBe(true);
     expect(invitations?.href).toBe("/settings/team/invitations");
   });
+
+  it("yönetici için Onay Rolleri bağlantısı görünür; member için gizli", () => {
+    expect(visibleNavItems(true).map((i) => i.key)).toContain("approval-roles");
+    expect(visibleNavItems(false).map((i) => i.key)).not.toContain("approval-roles");
+    const ar = NAV_ITEMS.find((i) => i.key === "approval-roles");
+    expect(ar?.requiresManage).toBe(true);
+    expect(ar?.href).toBe("/settings/team/approval-roles");
+  });
 });
