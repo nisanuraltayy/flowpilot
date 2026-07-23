@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Timeline } from "@/components/timeline";
 import { WorkflowRail } from "@/components/workflow-rail";
 import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
+import { isOrgManagerRole } from "@/features/organizations/roles";
 import { buildProcessSteps } from "@/features/purchase-requests/workflow-view";
 import { formatDateTime } from "@/lib/datetime";
 import { getPurchaseRequest, getPurchaseRequestTimeline } from "@/lib/api/resources";
@@ -68,6 +69,7 @@ export default async function PurchaseRequestDetailPage({ params }: PageProps) {
       userEmail={userEmail}
       organizationName={context.organization.name}
       activeNav="requests"
+      canManage={isOrgManagerRole(context.organization.membershipKind)}
     >
       <div className="mx-auto max-w-3xl">
         <Link

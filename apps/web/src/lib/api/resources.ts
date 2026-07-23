@@ -135,6 +135,54 @@ const decisionSchema = z.object({
   duplicate: z.boolean(),
 });
 
+// -------------------------------------------------------------- davet şemaları
+
+const invitationListSchema = z.object({
+  items: z.array(
+    z.object({
+      invitation_id: uuid,
+      invited_email: z.string(),
+      role: z.string(),
+      status: z.string(),
+      expires_at: timestamp,
+      created_at: timestamp,
+    }),
+  ),
+});
+
+const createdInvitationSchema = z.object({
+  invitation_id: uuid,
+  invited_email: z.string(),
+  role: z.string(),
+  status: z.string(),
+  expires_at: timestamp,
+  accept_url: nullableString,
+  token: nullableString,
+  duplicate: z.boolean(),
+});
+
+const revokedInvitationSchema = z.object({
+  invitation_id: uuid,
+  status: z.string(),
+  duplicate: z.boolean(),
+});
+
+const invitationPreviewSchema = z.object({
+  organization_id: uuid,
+  organization_name: z.string(),
+  role: z.string(),
+  expires_at: timestamp,
+  status: z.string(),
+});
+
+const acceptedInvitationSchema = z.object({
+  organization_id: uuid,
+  membership_id: uuid,
+  role: z.string(),
+  status: z.string(),
+  duplicate: z.boolean(),
+});
+
 // ---------------------------------------------------------------- domain tipleri
 
 export interface MyOrganization {
@@ -226,6 +274,61 @@ export interface CreatePurchaseRequestInput {
 export interface DecideApprovalTaskInput {
   readonly decision: "approve" | "reject";
   readonly comment: string | null;
+  readonly idempotencyKey: string;
+}
+
+export interface InvitationListItem {
+  readonly invitationId: string;
+  readonly invitedEmail: string;
+  readonly role: string;
+  readonly status: string;
+  readonly expiresAt: string;
+  readonly createdAt: string;
+}
+
+export interface CreatedInvitation {
+  readonly invitationId: string;
+  readonly invitedEmail: string;
+  readonly role: string;
+  readonly status: string;
+  readonly expiresAt: string;
+  /** Kabul URL'si + ham token YALNIZ ilk create cevabında (replay'de null). */
+  readonly acceptUrl: string | null;
+  readonly token: string | null;
+  readonly duplicate: boolean;
+}
+
+export interface RevokedInvitation {
+  readonly invitationId: string;
+  readonly status: string;
+  readonly duplicate: boolean;
+}
+
+export interface InvitationPreview {
+  readonly organizationId: string;
+  readonly organizationName: string;
+  readonly role: string;
+  readonly expiresAt: string;
+  readonly status: string;
+}
+
+export interface AcceptedInvitation {
+  readonly organizationId: string;
+  readonly membershipId: string;
+  readonly role: string;
+  readonly status: string;
+  readonly duplicate: boolean;
+}
+
+export interface CreateInvitationInput {
+  readonly email: string;
+  readonly role: "admin" | "member";
+  readonly idempotencyKey: string;
+}
+
+export interface AcceptInvitationInput {
+  readonly organizationId: string;
+  readonly token: string;
   readonly idempotencyKey: string;
 }
 
@@ -394,6 +497,113 @@ export async function decideApprovalTask(
     workflowStatus: value.workflow_status,
     nextApprovalRole: value.next_approval_role,
     decidedAt: value.decided_at,
+    duplicate: value.duplicate,
+  }));
+}
+
+// -------------------------------------------------------------- davet fonksiyonları
+
+export async function listInvitations(
+  accessToken: string,
+  organizationId: string,
+): Promise<ApiOutcome<readonly InvitationListItem[]>> {
+  const raw = await apiRequest({
+    method: "GET",
+    path: `${orgBase(organizationId)}/invitations`,
+    accessToken,
+  });
+  return parseOk(raw, invitationListSchema, (value) =>
+    value.items.map((item) => ({
+      invitationId: item.invitation_id,
+      invitedEmail: item.invited_email,
+      role: item.role,
+      status: item.status,
+      expiresAt: item.expires_at,
+      createdAt: item.created_at,
+    })),
+  );
+}
+
+export async function createInvitation(
+  accessToken: string,
+  organizationId: string,
+  input: CreateInvitationInput,
+): Promise<ApiOutcome<CreatedInvitation>> {
+  const raw = await apiRequest({
+    method: "POST",
+    path: `${orgBase(organizationId)}/invitations`,
+    accessToken,
+    body: { email: input.email, role: input.role },
+    extraHeaders: { "Idempotency-Key": input.idempotencyKey },
+  });
+  return parseOk(raw, createdInvitationSchema, (value) => ({
+    invitationId: value.invitation_id,
+    invitedEmail: value.invited_email,
+    role: value.role,
+    status: value.status,
+    expiresAt: value.expires_at,
+    acceptUrl: value.accept_url,
+    token: value.token,
+    duplicate: value.duplicate,
+  }));
+}
+
+export async function revokeInvitation(
+  accessToken: string,
+  organizationId: string,
+  invitationId: string,
+): Promise<ApiOutcome<RevokedInvitation>> {
+  const raw = await apiRequest({
+    method: "POST",
+    path: `${orgBase(organizationId)}/invitations/${invitationId}/revoke`,
+    accessToken,
+  });
+  return parseOk(raw, revokedInvitationSchema, (value) => ({
+    invitationId: value.invitation_id,
+    status: value.status,
+    duplicate: value.duplicate,
+  }));
+}
+
+/**
+ * Davet önizleme — PUBLIC (auth gerekmez). Token capability'dir ve backend'in zorunlu
+ * query parametresidir; server-to-server çağrıda kullanılır, loglanmaz. Ham token/email
+ * DÖNMEZ (backend zaten döndürmez).
+ */
+export async function previewInvitation(
+  organizationId: string,
+  token: string,
+): Promise<ApiOutcome<InvitationPreview>> {
+  const query = new URLSearchParams({ org: organizationId, token });
+  const raw = await apiRequest({
+    method: "GET",
+    path: `/v1/invitations/preview?${query.toString()}`,
+  });
+  return parseOk(raw, invitationPreviewSchema, (value) => ({
+    organizationId: value.organization_id,
+    organizationName: value.organization_name,
+    role: value.role,
+    expiresAt: value.expires_at,
+    status: value.status,
+  }));
+}
+
+export async function acceptInvitation(
+  accessToken: string,
+  input: AcceptInvitationInput,
+): Promise<ApiOutcome<AcceptedInvitation>> {
+  const raw = await apiRequest({
+    method: "POST",
+    path: "/v1/invitations/accept",
+    accessToken,
+    body: { organization_id: input.organizationId, token: input.token },
+    extraHeaders: { "Idempotency-Key": input.idempotencyKey },
+  });
+  return parseOk(raw, acceptedInvitationSchema, (value) => ({
+    organizationId: value.organization_id,
+    membershipId: value.membership_id,
+    role: value.role,
+    status: value.status,
     duplicate: value.duplicate,
   }));
 }

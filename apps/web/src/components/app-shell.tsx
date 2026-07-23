@@ -13,15 +13,24 @@ interface AppShellProps {
   readonly userEmail: string | null;
   readonly organizationName: string;
   readonly activeNav: NavKey;
+  /** owner/admin ise yönetim (Davetler) bağlantısı gösterilir (UX; backend esas). */
+  readonly canManage?: boolean;
   readonly children: React.ReactNode;
 }
 
-export function AppShell({ userEmail, organizationName, activeNav, children }: AppShellProps) {
+export function AppShell({
+  userEmail,
+  organizationName,
+  activeNav,
+  canManage = false,
+  children,
+}: AppShellProps) {
   const sidebar = (
     <AppSidebar
       userEmail={userEmail}
       organizationName={organizationName}
       activeNav={activeNav}
+      canManage={canManage}
     />
   );
 

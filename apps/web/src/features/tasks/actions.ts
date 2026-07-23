@@ -61,10 +61,14 @@ export async function decideApprovalTaskAction(
       return { status: "error", message: outcome.message };
     case "not_found":
       return { status: "error", message: "Bu görev artık sizde değil veya bulunamadı." };
+    case "gone":
+      return { status: "error", message: "Bu görev artık geçerli değil. Sayfayı yenileyin." };
     case "validation_error":
       return { status: "error", message: outcome.message };
     case "unauthorized":
       return { status: "error", message: "Oturumunuz sona ermiş.", requiresLogin: true };
+    case "forbidden":
+      return { status: "error", message: "Bu işlem için yetkiniz yok." };
     case "service_unavailable":
       return {
         status: "error",

@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { getUserEmail, requireActiveOrganization } from "@/features/organizations/context";
+import { isOrgManagerRole } from "@/features/organizations/roles";
 import { TaskInboxList } from "@/features/tasks/task-inbox-list";
 import { getMyTaskInbox } from "@/lib/api/resources";
 
@@ -22,7 +23,12 @@ export default async function TaskInboxPage() {
   const count = outcome.kind === "ok" ? outcome.data.length : 0;
 
   return (
-    <AppShell userEmail={userEmail} organizationName={context.organization.name} activeNav="inbox">
+    <AppShell
+      userEmail={userEmail}
+      organizationName={context.organization.name}
+      activeNav="inbox"
+      canManage={isOrgManagerRole(context.organization.membershipKind)}
+    >
       <PageHeader
         title="Onay Kutusu"
         description={
