@@ -42,8 +42,19 @@ _APPROVAL_ROLE_MANAGEMENT: frozenset[Permission] = frozenset(
     }
 )
 
+# Self-approval nedeniyle blocked task'ları görme + güvenli çözümleme: owner/admin.
+_BLOCKED_TASK_MANAGEMENT: frozenset[Permission] = frozenset(
+    {
+        Permission.APPROVAL_BLOCKED_TASK_READ,
+        Permission.APPROVAL_BLOCKED_TASK_RESOLVE,
+    }
+)
+
 _OWNER_ADMIN: frozenset[Permission] = (
-    _INVITATION_MANAGEMENT | _MEMBER_MANAGEMENT | _APPROVAL_ROLE_MANAGEMENT
+    _INVITATION_MANAGEMENT
+    | _MEMBER_MANAGEMENT
+    | _APPROVAL_ROLE_MANAGEMENT
+    | _BLOCKED_TASK_MANAGEMENT
 )
 
 # Merkezi katalog: rol → izin kümesi. Bilinmeyen/eksik rol → boş küme (deny).

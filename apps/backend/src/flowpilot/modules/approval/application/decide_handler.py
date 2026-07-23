@@ -2,10 +2,12 @@
 
 Tek transaction: runtime task transition + sonraki task + Purchase Request status +
 ApprovalDecision (append-only) + runtime event/outbox + audit entry'leri. Commit
-başarısızsa hiçbir kısmi state kalmaz. Yetki `assigned_user_id` iledir (owner #6);
-self-approval MVP'de SERBEST (owner #7, [[ASM-0016]]). Idempotency: aynı key replay →
-aynı sonuç; farklı payload/task → conflict. Concurrent iki karar → tek kazanan.
-Infrastructure/SQL hata detayı HTTP'ye sızmaz (application error'a çevrilir).
+başarısızsa hiçbir kısmi state kalmaz. Yetki `assigned_user_id` iledir (owner #6).
+Self-approval YASAKTIR (FP-E06-009, [[ASM-0016]] süperse): talep sahibi kendi talebindeki
+adımı sonuçlandıramaz; karar anı savunması `SelfApprovalConflictError` (409) döndürür ve
+güvenlik denial audit'i yazar (karar/state değişmez). Idempotency: aynı key replay → aynı
+sonuç; farklı payload/task → conflict. Concurrent iki karar → tek kazanan. Infrastructure/
+SQL hata detayı HTTP'ye sızmaz (application error'a çevrilir).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from flowpilot.modules.approval.application.errors import (
     ApprovalTaskNotAssignedError,
     DuplicateDecisionConflictError,
     InvalidApprovalDecisionError,
+    SelfApprovalConflictError,
 )
 from flowpilot.modules.approval.application.ports import ApprovalDecisionUnitOfWork
 from flowpilot.modules.approval.domain.enums import ApprovalDecisionType
@@ -43,6 +46,7 @@ from flowpilot.modules.workflow_runtime.application.errors import (
     ConcurrencyConflictError,
     DuplicateDecisionError,
     InvalidTransitionError,
+    SelfApprovalForbiddenError,
     SequenceOrderError,
     TerminalInstanceError,
     UnauthorizedApproverError,
@@ -118,6 +122,15 @@ class DecideApprovalTaskHandler:
                     decision=runtime_decision,
                     idempotency_key=command.idempotency_key,
                 )
+            except SelfApprovalForbiddenError as exc:
+                # Karar anı savunması: talep sahibi kendi talebini onaylayamaz. Guard HERHANGİ
+                # bir state mutasyonundan ÖNCE tetiklenir; bu nedenle uow yalnız güvenlik
+                # denial audit'ini içerir ve onu commit ederiz (başarılı KARAR state'i YOK).
+                self._write_self_approval_blocked_audit(uow, command, now=now)
+                uow.commit()
+                raise SelfApprovalConflictError(
+                    "talep sahibi kendi talebindeki onay adımını sonuçlandıramaz"
+                ) from exc
             except _NOT_FOUND as exc:
                 raise ApprovalTaskNotAssignedError("task bulunamadı veya atanmamış") from exc
             except _CONFLICT as exc:
@@ -175,6 +188,47 @@ class DecideApprovalTaskHandler:
             pr_status=outcome.status,
         )
 
+    def _write_self_approval_blocked_audit(
+        self,
+        uow: ApprovalDecisionUnitOfWork,
+        command: DecideApprovalTaskCommand,
+        *,
+        now: datetime,
+    ) -> None:
+        # Güvenlik denial audit'i (self-approval reddi). PR id'sini task→instance üzerinden
+        # çözer; task okunamazsa task_id aggregate'e düşülür (yine de kayıt yazılır).
+        try:
+            task = uow.tasks.get(command.task_id)
+            instance_id = task.instance_id.value
+            role_key: str | None = task.approver_role
+        except _NOT_FOUND:
+            instance_id = None
+            role_key = None
+        aggregate_id = command.task_id
+        if instance_id is not None:
+            aggregate_id = (
+                resolve_purchase_request_id(uow.purchase_requests, workflow_instance_id=instance_id)
+                or command.task_id
+            )
+        uow.audit.append(
+            AuditRecord(
+                event_id=self._ids.new_uuid(),
+                tenant_id=command.tenant_id,
+                aggregate_type=_AGGREGATE_PR,
+                aggregate_id=aggregate_id,
+                event_type=AuditEventType.APPROVAL_SELF_APPROVAL_BLOCKED,
+                occurred_at=now,
+                actor_user_id=command.actor_user_id,
+                role_key=role_key,
+                task_id=command.task_id,
+                metadata={
+                    "decision": command.decision,
+                    "reason": "self_approval",
+                    "requester_user_id": str(command.actor_user_id),
+                },
+            )
+        )
+
     def _write_audit(
         self,
         uow: ApprovalDecisionUnitOfWork,
@@ -212,6 +266,16 @@ class DecideApprovalTaskHandler:
                     AuditEventType.APPROVAL_TASK_ASSIGNED,
                     role=decision.next_approval_role,
                     task=decision.activated_task_id,
+                )
+            )
+        # Onay sonrası sıradaki adım self-approval nedeniyle blocked olduysa (talep sahibi =
+        # o adımın assignee'si): görünür biçimde audit'e yazılır (workflow ilerlemez).
+        if approved and decision.blocked_task_id is not None:
+            uow.audit.append(
+                entry(
+                    AuditEventType.APPROVAL_TASK_BLOCKED,
+                    role=decision.blocked_role,
+                    task=decision.blocked_task_id,
                 )
             )
         if decision.instance_status == "completed":

@@ -60,3 +60,15 @@ class WorkflowTaskNotFoundError(WorkflowRuntimeError):
 
 class DefinitionVersionNotFoundError(WorkflowRuntimeError):
     """Published version yok VEYA erişim yok."""
+
+
+class SelfApprovalForbiddenError(WorkflowRuntimeError):
+    """Talep sahibi kendi talebindeki onay adımını sonuçlandıramaz (FP-E06-009).
+
+    Karar anı savunması (defense-in-depth): assignee snapshot'ı yanlışlıkla requester
+    olsa (legacy/veri uyumsuzluğu) veya doğrudan API çağrısı yapılsa bile reddedilir.
+    """
+
+
+class TaskNotBlockedError(WorkflowRuntimeError):
+    """Resolve yalnız self-approval nedeniyle blocked kalan adım için geçerlidir."""

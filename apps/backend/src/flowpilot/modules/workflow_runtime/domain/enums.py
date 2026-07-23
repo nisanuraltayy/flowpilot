@@ -42,10 +42,14 @@ class WorkflowTaskStatus(StrEnum):
     """Human task / approval step durumu (domain-boundaries.md §5).
 
     Terminal: approved, rejected, changes_requested, cancelled.
+    `blocked` NON-terminal'dir: uygun onaycı yok (ör. çözülen assignee talep sahibi) →
+    adım kendisine geldiğinde active olmak yerine blocked olur; yalnız güvenli
+    resolve-assignment ile tekrar active olabilir (FP-E06-009).
     """
 
     PENDING = "pending"
     ACTIVE = "active"
+    BLOCKED = "blocked"
     APPROVED = "approved"
     REJECTED = "rejected"
     CHANGES_REQUESTED = "changes_requested"

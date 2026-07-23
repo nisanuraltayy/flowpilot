@@ -14,6 +14,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
+from flowpilot.modules.approval.application.blocked_task_dto import BlockedApprovalTaskView
+from flowpilot.modules.approval.application.blocked_task_ports import ActiveRoleAssignmentReader
 from flowpilot.modules.approval.application.ports import ApprovalDecisionRepository
 from flowpilot.modules.approval.application.role_assignment_dto import (
     ApprovalRoleAssignmentView,
@@ -110,6 +112,52 @@ class SqlAlchemyApprovalDecisionUnitOfWork(SqlAlchemyPurchaseRequestUnitOfWork):
         super().__enter__()
         session = self._require_session()
         self.approval_decisions = SqlAlchemyApprovalDecisionRepository(session)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        super().__exit__(exc_type, exc, tb)
+
+
+class SqlAlchemyActiveRoleAssignmentReader:
+    """`ActiveRoleAssignmentReader` — bir role_key'in AKTİF atanmış kullanıcısı (compose session).
+
+    Cross-module read yalnız composition root'ta; resolve UoW'nin session'ında (tenant context
+    set edilmiş) çalışır. Aktif atama yoksa None.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def find_active_user(self, *, tenant_id: UUID, role_key: str) -> UUID | None:
+        value = self._session.execute(
+            text(
+                "SELECT assigned_user_id FROM approval_role_assignments "
+                "WHERE tenant_id = :t AND role_key = :r AND status = 'active'"
+            ),
+            {"t": str(tenant_id), "r": role_key},
+        ).scalar_one_or_none()
+        return value if value is None else UUID(str(value))
+
+
+class SqlAlchemyResolveBlockedTaskUnitOfWork(SqlAlchemyPurchaseRequestUnitOfWork):
+    """runtime UoW + aktif role assignment reader + purchase_requests + audit — TEK transaction.
+
+    Blocked task çözümleme akışının cross-module ATOMİKLİĞİ: runtime task transition (blocked→
+    active) + audit AYNI session/transaction'da commit edilir. `role_assignments` ve
+    `purchase_requests` aynı session'da okunur (tutarlı snapshot).
+    """
+
+    role_assignments: ActiveRoleAssignmentReader
+
+    def __enter__(self) -> SqlAlchemyResolveBlockedTaskUnitOfWork:
+        super().__enter__()
+        session = self._require_session()
+        self.role_assignments = SqlAlchemyActiveRoleAssignmentReader(session)
         return self
 
     def __exit__(
@@ -423,6 +471,58 @@ class SqlAlchemyMemberUpdateUnitOfWork:
         if self._session is None:
             raise RuntimeError("UnitOfWork aktif degil — 'with uow:' blogu icinde kullanin.")
         return self._session
+
+
+class SqlAlchemyBlockedApprovalTaskListReadModel:
+    """`BlockedApprovalTaskListQuery` — workflow_runtime_tasks + instances + PR JOIN.
+
+    Cross-module read yalnız composition root'ta. Tenant-scoped (RLS); YALNIZ blocked task'lar,
+    deterministik sırada. requester_id instance.context JSONB'sinden okunur; hassas identity YOK.
+    """
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def list_blocked(self, *, tenant_id: UUID, limit: int) -> list[BlockedApprovalTaskView]:
+        with self._session_factory() as session, session.begin():
+            session.execute(
+                text("SELECT set_config('app.current_tenant_id', :v, true)"),
+                {"v": str(tenant_id)},
+            )
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT t.id AS task_id, p.id AS pr_id, t.approver_role, t.status, "
+                        "t.blocked_reason, i.context->>'requester_id' AS requester_user_id, "
+                        "t.version, t.created_at, t.updated_at "
+                        "FROM workflow_runtime_tasks t "
+                        "JOIN workflow_runtime_instances i ON i.id = t.instance_id "
+                        "LEFT JOIN purchase_request_requests p "
+                        "  ON p.workflow_instance_id = t.instance_id "
+                        "WHERE t.tenant_id = :t AND t.status = 'blocked' "
+                        "ORDER BY t.created_at ASC, t.id ASC LIMIT :limit"
+                    ),
+                    {"t": str(tenant_id), "limit": limit},
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            BlockedApprovalTaskView(
+                task_id=row["task_id"],
+                purchase_request_id=row["pr_id"],
+                approver_role=str(row["approver_role"]),
+                status=str(row["status"]),
+                blocked_reason=row["blocked_reason"],
+                requester_user_id=(
+                    UUID(str(row["requester_user_id"])) if row["requester_user_id"] else None
+                ),
+                version=int(row["version"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
 
 
 class SqlAlchemyApprovalRoleAssignmentListReadModel:

@@ -281,6 +281,8 @@ class SqlAlchemyTaskRepository:
                 approver_role=task.approver_role,
                 assigned_user_id=task.assigned_user_id.value if task.assigned_user_id else None,
                 status=task.status.value,
+                blocked_reason=task.blocked_reason,
+                blocked_at=task.blocked_at,
                 version=task.version,
                 created_at=now,
                 updated_at=now,
@@ -302,11 +304,29 @@ class SqlAlchemyTaskRepository:
             decision=WorkflowTaskStatus(row["decision"]) if row["decision"] else None,
             idempotency_key=row["idempotency_key"],
             assigned_user_id=(UserId(row["assigned_user_id"]) if row["assigned_user_id"] else None),
+            blocked_reason=row["blocked_reason"],
+            blocked_at=row["blocked_at"],
         )
 
     def get(self, task_id: UUID) -> WorkflowTask:
         row = (
             self._session.execute(select(tasks_table).where(tasks_table.c.id == task_id))
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise WorkflowTaskNotFoundError("workflow task bulunamadı")
+        return self._map(dict(row))
+
+    def get_for_update(self, task_id: UUID) -> WorkflowTask:
+        """Task'ı satır kilidiyle (FOR UPDATE) okur — eşzamanlı resolve serileştirmesi.
+
+        İki resolve yarışında ilki satırı kilitler ve blocked→active yapar; ikincisi
+        kilit serbest kalınca artık-active task'ı okur ve TaskNotBlockedError alır."""
+        row = (
+            self._session.execute(
+                select(tasks_table).where(tasks_table.c.id == task_id).with_for_update()
+            )
             .mappings()
             .first()
         )
@@ -355,6 +375,11 @@ class SqlAlchemyTaskRepository:
                 decided_by_user_id=task.decided_by.value if task.decided_by else None,
                 decision=task.decision.value if task.decision else None,
                 idempotency_key=task.idempotency_key,
+                # assignee + blocked alanları da yazılır: block/resolve geçişleri assignee'yi
+                # ve blocked_reason/blocked_at'i değiştirir (karar yolu için değer AYNI kalır).
+                assigned_user_id=task.assigned_user_id.value if task.assigned_user_id else None,
+                blocked_reason=task.blocked_reason,
+                blocked_at=task.blocked_at,
                 version=task.version,
                 updated_at=now,
             )
@@ -363,12 +388,13 @@ class SqlAlchemyTaskRepository:
             raise ConcurrencyConflictError("task eşzamanlı değişti — 409/412")
 
     def cancel_open_for_instance(self, instance_id: UUID, *, now: datetime) -> None:
+        # blocked adımlar da (instance reject/cancel'da) iptal edilir.
         self._session.execute(
             update(tasks_table)
             .where(
                 and_(
                     tasks_table.c.instance_id == instance_id,
-                    tasks_table.c.status.in_(("pending", "active")),
+                    tasks_table.c.status.in_(("pending", "active", "blocked")),
                 )
             )
             .values(status="cancelled", version=tasks_table.c.version + 1, updated_at=now)
