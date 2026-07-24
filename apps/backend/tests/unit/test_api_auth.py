@@ -165,9 +165,17 @@ def test_unconfigured_supabase_returns_503_not_500() -> None:
 
 
 def test_health_endpoints_require_no_token() -> None:
+    # Health endpoint'leri token GEREKTİRMEZ: 401/403 dönmezler.
+    # Liveness her zaman 200. Readiness gerçek database kontrolü yapar (FP-OPS-002);
+    # bu testte database yapılandırılmadığı için 503 döner — bu bir AUTH reddi DEĞİLDİR.
     client, _ = _client()
+
     assert client.get("/health/live").status_code == 200
-    assert client.get("/health/ready").status_code == 200
+
+    ready = client.get("/health/ready")
+    assert ready.status_code == 503
+    assert ready.status_code not in (401, 403)
+    assert "WWW-Authenticate" not in ready.headers
 
 
 # ------------------------------------------------------------------ 201 / 422

@@ -67,6 +67,29 @@ def test_web_dockerignore_excludes_build_artifacts_but_keeps_sources() -> None:
         assert stripped not in required, f"gerekli kaynak dislanmis: {stripped}"
 
 
+def _stages(path: Path) -> dict[str, str]:
+    """Dockerfile'i `FROM ... AS <ad>` sinirlarindan stage'lere ayirir (yorumsuz).
+
+    Stage adi olmayan bir FROM bulunursa test anlamli sekilde patlar; boylece
+    stage'e bagli iddialar sessizce bos metin uzerinde dogrulanmaz.
+    """
+    stages: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in _instructions(path).splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("FROM "):
+            parts = stripped.split()
+            assert len(parts) >= 4 and parts[-2].upper() == "AS", f"adsiz FROM: {stripped}"
+            current = stages.setdefault(parts[-1], [])
+        if current is not None:
+            current.append(line)
+    return {name: "\n".join(lines) for name, lines in stages.items()}
+
+
+def _stage_order(path: Path) -> list[str]:
+    return list(_stages(path))
+
+
 def test_backend_dockerfile_deployment_contract() -> None:
     instructions = _instructions(_BACKEND / "Dockerfile")
     # Non-root calisir.
@@ -78,11 +101,53 @@ def test_backend_dockerfile_deployment_contract() -> None:
     assert "--host 0.0.0.0" in instructions
     # Startup'ta OTOMATIK migration YOK (talimatlarda alembic upgrade calismaz).
     assert "upgrade head" not in instructions
-    # Healthcheck YALNIZ gercek liveness endpoint'ini kullanir (sahte readiness degil).
+    # Healthcheck YALNIZ gercek liveness endpoint'ini kullanir (readiness DEGIL:
+    # gecici bir database kesintisi saglikli API surecini oldurmemeli).
     assert "/health/live" in instructions
     assert "/health/ready" not in instructions
-    # Worker bu image'in default process'i DEGILDIR.
-    assert "flowpilot.worker" not in instructions
+
+
+def test_backend_default_build_target_is_api_not_worker() -> None:
+    """`--target` verilmeden yapilan build API uretir; worker default DEGILDIR."""
+    order = _stage_order(_BACKEND / "Dockerfile")
+
+    assert order[-1] == "api", f"son stage 'api' olmali, bulunan: {order[-1]}"
+    assert "worker-runtime" in order
+    assert order.index("worker-runtime") < order.index("api")
+
+
+def test_backend_api_stage_does_not_run_worker() -> None:
+    api_stage = _stages(_BACKEND / "Dockerfile")["api"]
+
+    assert "flowpilot.api.main:app" in api_stage
+    assert "flowpilot.worker" not in api_stage
+
+
+def test_backend_worker_stage_runs_service_mode_without_http() -> None:
+    worker_stage = _stages(_BACKEND / "Dockerfile")["worker-runtime"]
+
+    # Worker AYRI bir composition root'tur; ASGI uygulamasini CALISTIRMAZ.
+    assert "flowpilot.api.main:app" not in worker_stage
+    assert "uvicorn" not in worker_stage
+    # Servis modu + heartbeat tabanli healthcheck (HTTP portu YOK).
+    assert '"--serve"' in worker_stage
+    assert '"--check-heartbeat"' in worker_stage
+    assert "HEALTHCHECK" in worker_stage
+    assert "EXPOSE" not in worker_stage
+    # API liveness healthcheck'i worker'da KULLANILMAZ.
+    assert "/health/live" not in worker_stage
+    # Tenant listesi image'a GOMULMEZ (environment'tan gelir).
+    assert "WORKER_TENANT_IDS=" not in worker_stage
+    # Startup'ta migration YOK.
+    assert "upgrade head" not in worker_stage
+
+
+def test_backend_worker_stage_declares_heartbeat_defaults() -> None:
+    worker_stage = _stages(_BACKEND / "Dockerfile")["worker-runtime"]
+
+    # Kod default'u ile AYNI yol; secret degildir.
+    assert "WORKER_HEARTBEAT_PATH=/tmp/flowpilot-worker-heartbeat.json" in worker_stage
+    assert "WORKER_HEARTBEAT_MAX_AGE_SECONDS=60" in worker_stage
 
 
 def test_web_dockerfile_deployment_contract() -> None:

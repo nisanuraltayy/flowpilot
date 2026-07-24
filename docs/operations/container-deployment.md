@@ -6,8 +6,10 @@
 > **değiştirmez**. Sağlayıcıya özel manifest (render.yaml, vercel.json, fly.toml …)
 > bilinçli olarak **yoktur**.
 >
-> Tamamlayıcı belge: [deployment-runbook.md](deployment-runbook.md) (ortam envanteri,
-> rollback, incident). Bu belge yalnız **container paketleme ve çalıştırma** katmanıdır.
+> Tamamlayıcı belgeler: [deployment-runbook.md](deployment-runbook.md) (ortam envanteri,
+> rollback, incident) ve [worker-operations.md](worker-operations.md) (worker servis modu,
+> heartbeat, healthcheck ve operasyon prosedürleri). Bu belge yalnız **container paketleme
+> ve çalıştırma** katmanıdır.
 
 ## 1. Bileşenler ve image'lar
 
@@ -15,8 +17,14 @@
 |---|---|---|---|
 | API (FastAPI) | `apps/backend` | `apps/backend/Dockerfile` | `uvicorn flowpilot.api.main:app` |
 | Web (Next.js) | `apps/web` | `apps/web/Dockerfile` | `node server.js` (standalone) |
-| Worker | — | **YOK (bilinçli)** | Worker sürekli servis modu **FP-OPS-002** kapsamındadır |
+| Worker | `apps/backend` | `apps/backend/Dockerfile` — **`--target worker-runtime`** | `python -m flowpilot.worker --serve` |
 | PostgreSQL | — | Managed servis | Container içinde **tutulmaz** (bkz. §8) |
+
+API ve worker **aynı image ailesindendir**: tek Python distribution'ın iki composition
+root'u (ADR-009), ortak `runtime` katmanını paylaşırlar. `api` stage'i Dockerfile'ın
+**en sonundadır**, bu yüzden `--target` verilmeden yapılan build **API** üretir; worker
+hiçbir koşulda default process değildir. İkisi **ayrı servis** olarak çalıştırılır —
+tek container'da birleştirilmez.
 
 Her iki context de **kendi kendine yeterlidir**: `apps/backend` tek Python distribution'dır
 (ADR-009), `apps/web` kendi `package.json` + `package-lock.json`'ına sahiptir. Monorepo
@@ -26,6 +34,10 @@ kökünü build context yapmaya gerek yoktur.
 
 ```bash
 docker build -t flowpilot-api:<tag> apps/backend
+```
+
+```bash
+docker build --target worker-runtime -t flowpilot-worker:<tag> apps/backend
 ```
 
 ```bash
@@ -52,6 +64,18 @@ docker run -d --name flowpilot-api -p 8000:8000 \
 ```
 
 ```bash
+docker run -d --name flowpilot-worker \
+  -e APP_ENVIRONMENT=production \
+  -e DATABASE_URL=<app-role-connection-string> \
+  -e WORKER_TENANT_IDS=<tenant-uuid[,tenant-uuid...]> \
+  flowpilot-worker:<tag>
+```
+
+Worker **HTTP portu dinlemez** (`-p` yoktur) ve `WORKER_TENANT_IDS` boşsa **kontrollü hata**
+ile çıkar — sessizce boş çalışmaz. Worker cross-tenant keşif yapmaz: uygulama rolü
+`flowpilot_app` NOBYPASSRLS'tir, bu yüzden işlenecek tenant'lar **açıkça** verilir.
+
+```bash
 docker run -d --name flowpilot-web -p 3000:3000 \
   -e FLOWPILOT_API_BASE_URL=<api-base-url> \
   flowpilot-web:<tag>
@@ -71,6 +95,29 @@ Her ikisi de `0.0.0.0` dinler ve **non-root** çalışır (API uid `10001`, Web 
 | `SUPABASE_URL` | ✅ | JWKS/issuer bundan türetilir |
 | `APP_DEBUG` | — | staging/production'da `true` **reddedilir** (§6) |
 | `APP_PORT`, `LOG_LEVEL`, `FRONTEND_BASE_URL` | — | Davet linki için `FRONTEND_BASE_URL` önerilir |
+
+### Worker (runtime)
+
+| Değişken | Zorunlu | Not |
+|---|---|---|
+| `APP_ENVIRONMENT` | ✅ | API ile aynı strict doğrulama |
+| `DATABASE_URL` | ✅ | Uygulama rolü `flowpilot_app` (BYPASSRLS **yok**) |
+| `WORKER_TENANT_IDS` | ✅ | Virgülle ayrılmış tenant UUID allowlist'i; boşsa süreç başlamaz |
+| `WORKER_POLL_INTERVAL_SECONDS` | — | Sweep'ler arası bekleme; default `1.0`, minimum `0.1` |
+| `WORKER_HEARTBEAT_PATH` | — | Default `/tmp/flowpilot-worker-heartbeat.json`; heartbeat **kapatılamaz**, boş değer reddedilir |
+| `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | — | Tazelik eşiği; default `60`, minimum `1.0`. Poll interval + en uzun sweep'ten **büyük** seçilir |
+
+Worker'ın liveness'i HTTP ile ölçülemez (port yok). Bunun yerine süreç yaşam döngüsünü
+heartbeat **JSON belgesine** yazar: startup'ta `starting`, her tamamlanan sweep'te tam
+başarıysa `healthy` / en az bir tenant hatalıysa `degraded`, stop'ta `stopping` → `stopped`.
+Container healthcheck'i `python -m flowpilot.worker --check-heartbeat` yalnız
+`status=healthy` VE `last_full_success_at` eşik içinde tazeyse 0 döner — worker loop
+başlatmaz ve **database'e dokunmaz**. Sürekli başarısız bir worker dosyayı taze yazsa bile
+healthy sayılmaz. Belge yalnız status/pid/UTC damgaları/tenant SAYISI/hata sayacı içerir
+(tenant UUID, DSN, secret, PII yok) ve kalıcı volume gerektirmez. Startup heartbeat'i
+yazılamazsa worker fail-fast eder; sonraki yazım hataları loglanır ama **dispatch durmaz**
+(dosya bayatlar, healthcheck düşer). Ayrıntılı yaşam döngüsü, checker kuralları ve operasyon
+prosedürleri: [worker-operations.md](worker-operations.md).
 
 ### Web (runtime)
 
@@ -137,8 +184,8 @@ networking sunuyorsa API private tutulabilir.
 
 | Konu | Nereye ait |
 |---|---|
-| Worker container/servis modu | **FP-OPS-002** (worker şu an `--tenant` + sınırlı `--max-passes` ister) |
-| Gerçek readiness (`/health/ready` bağımlılık kontrolü) | **FP-OPS-002** — bu yüzden container healthcheck'i yalnız `/health/live` kullanır |
+| Worker otomatik ölçekleme / birden çok replika koordinasyonu | Sağlayıcı katmanı (outbox `FOR UPDATE SKIP LOCKED` çoklu worker'a hazırdır) |
+| Readiness'in container healthcheck'i olarak kullanılması | Bilinçli DEĞİL: geçici database kesintisi sağlıklı API sürecini öldürmemeli; readiness platform trafik kararına aittir |
 | Güvenlik header'ları, CORS, rate limiting | **FP-OPS-003** |
 | Hata izleme, e-posta, metrik | FP-OPS-004 ve sonrası |
 | Sağlayıcı seçimi / manifest | ADR-010 kapsamı — **değiştirilmedi** |
