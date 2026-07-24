@@ -69,7 +69,7 @@ describe("next.config security headers (FP-OPS-003B)", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it("bu dilimde bilinçli eklenmeyen header'lar yok (CSP/HSTS/CORS/COEP/Cache-Control)", async () => {
+  it("next.config headers() CSP eklemiyor — CSP YALNIZ proxy katmanından gelir (FP-OPS-004A); HSTS/CORS/COEP/Cache-Control da yok", async () => {
     const [route] = await resolveHeaderRoutes();
     const names = new Set(route!.headers.map((h) => h.key.toLowerCase()));
 

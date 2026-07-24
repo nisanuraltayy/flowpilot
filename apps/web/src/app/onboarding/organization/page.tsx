@@ -4,6 +4,12 @@ import { AuthCard } from "@/components/auth-card";
 import { createOrganizationAction } from "@/features/organizations/actions";
 import { OrganizationForm } from "@/features/organizations/organization-form";
 
+// Nonce tabanlı CSP (FP-OPS-004A): bu sayfa build'de prerender edilirse inline
+// hydration script'leri nonce'suz kalır ve enforce edilen politika onları
+// bloklar. Bu yüzden request-time render zorunludur.
+export const dynamic = "force-dynamic";
+
+
 export const metadata: Metadata = { title: "Şirketini oluştur" };
 
 /**

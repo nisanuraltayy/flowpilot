@@ -1,9 +1,16 @@
 import Link from "next/link";
+import { connection } from "next/server";
 
 import { ButtonLink } from "@/components/button";
 import { FlowPilotLogo } from "@/components/flowpilot-logo";
 
-export default function NotFound() {
+export default async function NotFound() {
+  // Nonce tabanlı CSP (FP-OPS-004C): build-time prerender edilen `_not-found`
+  // HTML'i nonce'suz framework script'leri içerir ve enforce edilen politika
+  // 404 hydration'ını bloklar. `connection()` bu route'u request-time render'a
+  // geçirir; her 404 yanıtı isteğin nonce'uyla üretilir. UX/içerik DEĞİŞMEZ.
+  await connection();
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas px-4 text-center">
       <FlowPilotLogo />
