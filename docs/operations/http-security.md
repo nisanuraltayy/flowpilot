@@ -156,6 +156,34 @@ Kurallar ve doğrulanan davranış:
 - İleride popup tabanlı OAuth, embed veya iframe gereksinimi eklenirse
   `Cross-Origin-Opener-Policy` ve `X-Frame-Options` sözleşmesi **yeniden incelenir**.
 
+## 6b. Next.js Content Security Policy (FP-OPS-004A)
+
+Nonce tabanlı CSP **enforce** edilir (Report-Only YOK; violation reporting servisi
+bilinçli olarak kurulmamıştır). Politika `apps/web/src/lib/csp.ts`'te deterministik
+üretilir; `src/proxy.ts` her document isteği için **yeni 128-bit Web Crypto nonce**
+üretip politikayı hem request header'ına (Next render katmanı framework inline
+script'lerine nonce'ı buradan uygular) hem response'a yazar. Nonce loglanmaz,
+cookie'ye/başka header'a yazılmaz.
+
+**Production politikası:** `default-src 'none'` · `base-uri 'self'` ·
+`object-src 'none'` · `frame-ancestors 'none'` (X-Frame-Options: DENY ile uyumlu) ·
+`form-action 'self'` · `script-src 'self' 'nonce-…' 'strict-dynamic'` ·
+`style-src/img-src/font-src/connect-src 'self'` · `worker-src/frame-src 'none'`.
+`unsafe-eval`/`unsafe-inline`/`data:`/`blob:`/`wss:` ve **hiçbir dış origin yoktur** —
+browser Supabase'e doğrudan bağlanmaz (tüm auth server-side; kanıt: FP-OPS-004
+audit). **Development farkı yalnız HMR içindir:** script-src `'unsafe-eval'`,
+style-src `'unsafe-inline'`, connect-src `ws:` — production'a sızmadığı testle pinlidir.
+
+**Dynamic rendering etkisi (owner-onaylı):** daha önce prerender edilen
+`/signup`, `/auth/check-email`, `/auth/error`, `/onboarding/organization`
+sayfaları `export const dynamic = "force-dynamic"` ile request-time render'a
+alındı (build-time HTML nonce'suz kalırdı). Framework'ün `_not-found` /
+`_global-error` sayfaları static kalır — 404 üzerindeki runtime CSP davranışı
+FP-OPS-004B doğrulamasının konusudur. Baseline beş header `next.config.ts`'te
+değişmeden durur; CSP **yalnız proxy katmanından** gelir. Yeni environment
+değişkeni yoktur. Kapsamlı runtime/Docker/browser doğrulaması FP-OPS-004B'de
+tamamlanacaktır.
+
 ## 7. Deferred controls and deployment-dependent decisions (FP-OPS-003C)
 
 Bu bölümdeki kontrollerin **hiçbiri uygulanmamıştır**; her biri *deferred*
@@ -225,7 +253,7 @@ FP-OPS-003C'de uygulanmamıştır; kodda olmayan limit değeri bu belgeye yazıl
 | Konu | Durum | Neden / nereye ait |
 |---|---|---|
 | HSTS | Requires provider decision (OQ-014) | TLS termination edge'dedir (§3 ve §6'daki gerekçe) |
-| CSP | Deferred — ayrı frontend dilimi | Nonce tabanlı dinamik üretim ister (§6'daki gerekçe); baseline header'lar mevcut hâliyle korunur |
+| CSP violation reporting | Deferred | Collector/telemetry kurulmadan Report-Only değersiz; sağlayıcı sonrası değerlendirilir (CSP kendisi UYGULANDI — §6b) |
 | Proxy trust (`--forwarded-allow-ips`) | Requires provider decision (OQ-011) | §5'teki kesin kurallar geçerli |
 | HTTPS redirect | Edge'de | Uygulama katmanında healthcheck'i kırar |
 | Edge WAF | Requires provider decision | Sağlayıcı yeteneklerine bağlı |
