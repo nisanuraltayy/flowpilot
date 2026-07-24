@@ -18,6 +18,9 @@ from flowpilot.config.settings import Settings
 
 _REMOTE_DB = "postgresql+psycopg://flowpilot_app:pw@db.internal.example:5432/flowpilot"
 _REMOTE_SUPABASE = "https://project.supabase.co"
+# FP-OPS-003A: strict ortamda API_TRUSTED_HOSTS da zorunludur. Bu sabit,
+# başka bir alanın davranışını test eden senaryolara "geçerli" değer sağlar.
+_TRUSTED_HOSTS = "api.example.test"
 
 
 def _settings(**overrides: object) -> Settings:
@@ -86,6 +89,7 @@ def test_local_database_url_is_rejected_in_production(database_url: str) -> None
                 app_environment="production",
                 database_url=SecretStr(database_url),
                 supabase_url=_REMOTE_SUPABASE,
+                api_trusted_hosts=_TRUSTED_HOSTS,
             )
         )
 
@@ -99,6 +103,7 @@ def test_local_supabase_url_is_rejected_in_production() -> None:
                 app_environment="production",
                 database_url=SecretStr(_REMOTE_DB),
                 supabase_url="http://localhost:54321",
+                api_trusted_hosts=_TRUSTED_HOSTS,
             )
         )
 
@@ -112,6 +117,7 @@ def test_staging_allows_local_addresses() -> None:
             app_environment="staging",
             database_url=SecretStr("postgresql+psycopg://flowpilot_app:pw@localhost:5432/fp"),
             supabase_url=_REMOTE_SUPABASE,
+            api_trusted_hosts=_TRUSTED_HOSTS,
         )
     )
     assert app is not None
@@ -127,6 +133,7 @@ def test_valid_production_configuration_starts() -> None:
             app_debug=False,
             database_url=SecretStr(_REMOTE_DB),
             supabase_url=_REMOTE_SUPABASE,
+            api_trusted_hosts=_TRUSTED_HOSTS,
         )
     )
     assert app is not None
