@@ -236,6 +236,33 @@ const assignedApprovalRoleSchema = z.object({
   duplicate: z.boolean(),
 });
 
+// -------------------------------------------------- engellenen görev şemaları
+
+const blockedTasksSchema = z.object({
+  items: z.array(
+    z.object({
+      task_id: uuid,
+      purchase_request_id: uuid.nullable(),
+      approver_role: z.string(),
+      status: z.string(),
+      blocked_reason: nullableString,
+      requester_user_id: uuid.nullable(),
+      version: z.number().int().nonnegative(),
+      created_at: timestamp,
+      updated_at: timestamp,
+    }),
+  ),
+});
+
+const resolvedBlockedTaskSchema = z.object({
+  task_id: uuid,
+  purchase_request_id: uuid.nullable(),
+  approver_role: z.string(),
+  status: z.string(),
+  assigned_user_id: uuid,
+  version: z.number().int().nonnegative(),
+});
+
 // ---------------------------------------------------------------- domain tipleri
 
 export interface MyOrganization {
@@ -437,6 +464,27 @@ export interface AssignApprovalRoleInput {
   readonly userId: string;
   /** Mevcut aktif atama varsa zorunlu; ilk atamada omit (backend null kabul eder). */
   readonly expectedVersion?: number;
+}
+
+export interface BlockedApprovalTask {
+  readonly taskId: string;
+  readonly purchaseRequestId: string | null;
+  readonly approverRole: string;
+  readonly status: string;
+  readonly blockedReason: string | null;
+  readonly requesterUserId: string | null;
+  readonly version: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ResolvedBlockedTask {
+  readonly taskId: string;
+  readonly purchaseRequestId: string | null;
+  readonly approverRole: string;
+  readonly status: string;
+  readonly assignedUserId: string;
+  readonly version: number;
 }
 
 // -------------------------------------------------------------------- fonksiyonlar
@@ -820,5 +868,55 @@ export async function assignApprovalRole(
     status: value.status,
     version: value.version,
     duplicate: value.duplicate,
+  }));
+}
+
+// ------------------------------------------------ engellenen görev fonksiyonları
+
+export async function listBlockedApprovalTasks(
+  accessToken: string,
+  organizationId: string,
+): Promise<ApiOutcome<readonly BlockedApprovalTask[]>> {
+  const raw = await apiRequest({
+    method: "GET",
+    path: `${orgBase(organizationId)}/approval-tasks/blocked`,
+    accessToken,
+  });
+  return parseOk(raw, blockedTasksSchema, (value) =>
+    value.items.map((item) => ({
+      taskId: item.task_id,
+      purchaseRequestId: item.purchase_request_id,
+      approverRole: item.approver_role,
+      status: item.status,
+      blockedReason: item.blocked_reason,
+      requesterUserId: item.requester_user_id,
+      version: item.version,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    })),
+  );
+}
+
+/**
+ * Engellenen görevin atamasını çöz. Backend adayı KENDİSİ (mevcut aktif rol atamasından)
+ * seçer — request user_id/version/idempotency ALMAZ; yalnız task_id path'ten gelir.
+ */
+export async function resolveBlockedApprovalTaskAssignment(
+  accessToken: string,
+  organizationId: string,
+  taskId: string,
+): Promise<ApiOutcome<ResolvedBlockedTask>> {
+  const raw = await apiRequest({
+    method: "POST",
+    path: `${orgBase(organizationId)}/approval-tasks/${taskId}/resolve-assignment`,
+    accessToken,
+  });
+  return parseOk(raw, resolvedBlockedTaskSchema, (value) => ({
+    taskId: value.task_id,
+    purchaseRequestId: value.purchase_request_id,
+    approverRole: value.approver_role,
+    status: value.status,
+    assignedUserId: value.assigned_user_id,
+    version: value.version,
   }));
 }

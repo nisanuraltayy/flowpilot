@@ -802,4 +802,64 @@ Format:
     atama/üye verisi ve target user_id browser storage'a yazılmaz. Blocked-task resolve UI, üye
     yönetimi, e-posta teslimi ve hosting kapsam dışıdır.
   reference: apps/web/src/features/approval-roles/actions.ts
+
+- id: ASM-0026
+  statement: >
+    Engellenen onay görevleri arayüzü (FP-FE-004, frontend dilim) güvenlik, kapsam ve sözleşme
+    kararları. Backend/migration/alembic head (0011) DEĞİŞMEDİ; frontend yalnız mevcut sözleşmeleri
+    tüketir: GET /v1/organizations/{id}/approval-tasks/blocked (task_id/purchase_request_id?/
+    approver_role/status/blocked_reason?/requester_user_id?/version/created_at/updated_at) ve POST
+    .../approval-tasks/{task_id}/resolve-assignment. (a) KRİTİK SÖZLEŞME: resolve endpoint'i KULLANICI
+    SEÇİMİ ALMAZ — request body/user_id/expected_version/Idempotency-Key YOK; yalnız task_id path'ten
+    gelir. Backend adayı KENDİSİ mevcut aktif approval-role assignment'tan (task.approver_role için)
+    seçer; "keyfi user_id ALINMAZ". Bu nedenle istenen aday-SEÇİM modalı (owner talebindeki UI)
+    backend ile uyumsuzdu; owner kararıyla (2026-07-24) sözleşme-sadık SEÇİMSİZ onay akışı uygulandı:
+    blocked görev listesi + tek "Atamayı çöz" onay diyaloğu. Aday-seçim UI, aday-listeleme endpoint'i
+    ve frontend aday-türetme YAPILMADI (backend workaround'dan kaçınıldı). (b) Görünürlük UX-only;
+    backend policy TEK karar kaynağıdır (APPROVAL_BLOCKED_TASK_READ/RESOLVE → owner/admin; member 403;
+    non-member/cross-tenant 404). Sayfa owner/admin gate'lidir. (c) blocked_reason backend'de CHECK ile
+    kısıtlı; tek gerçek değer `self_approval_no_eligible_assignee` → "Kendi talebini onaylama engeli".
+    Bilinmeyen/null reason güvenli genel fallback ("Atama sorunu") alır; ham reason kullanıcıya
+    gösterilmek zorunda değildir ve DOM'a dump edilmez. (d) Resolve yaşam döngüsü (backend): blocked →
+    çözülür, aday task'a pinlenir, requester≠aday runtime'da zorlanır (self-approval), YALNIZ seçili
+    görevi etkiler, global approval-role assignment DEĞİŞMEZ, audit yazılır. UI bunu doğru yansıtır:
+    "yalnız bu görevi etkiler; onay rolü yapılandırmasını değiştirmez"; approve/reject sunmaz; workflow
+    step'i otomatik tamamlanmış göstermez. (e) Backend concurrency'yi kendi içinde yönetir; frontend
+    version GÖNDERMEZ (sahte version üretilmez). Her 409 çakışmasında liste revalidatePath ile
+    tazelenir (otomatik retry YOK); modalda resubmit engellenir (stale/not-blocked/candidate-inactive/
+    generic → yalnız Kapat), no_assignment ise rol atandıktan sonra tekrar denenebilir. (f) Backend 409
+    ham detay'ı KULLANICIYA GÖSTERİLMEZ; kararlı belirteçlerle güvenli sabit mesajlara sınıflandırılır
+    (not_blocked / no_assignment / candidate_inactive / genel). (g) Liste yalnız güvenli alanlar
+    döndürür: talep başlığı ve requester e-postası backend'den GELMEZ. Talep sahibi e-postası (mevcutsa)
+    üye listesinden eşlenir; eşleşmezse "Bilinmiyor" (uydurulmaz). Talep referansı kısa ID metni olarak
+    gösterilir (link verilmedi — owner/admin'in keyfi PR'ı görme yetkisi doğrulanamadı; bilinen
+    sınırlama). (h) Güvenlik: provider_subject/auth_provider/JWT frontend tiplerine/DOM'a alınmaz; ham
+    backend response loglanmaz; task/member/assignment verisi ve target user_id browser storage'a
+    yazılmaz. (i) Bu dilim approve/reject UI DEĞİLDİR, genel task reassignment sistemi DEĞİLDİR;
+    approval-role configuration FP-FE-003'tedir; e-posta teslimi ve hosting kapsam dışıdır. Yeni
+    state-yönetimi/UI kütüphanesi eklenmedi.
+  impact: high
+  reversible: true
+  owner: product
+  status: validated
+  validation_method: >
+    Ön inceleme (2026-07-24) resolve endpoint'inin kullanıcı seçimi kabul etmediğini (aday, mevcut
+    aktif rol atamasından otomatik) ortaya çıkardı; owner, aday-seçim modalı yerine sözleşme-sadık
+    seçimsiz onay akışını onayladı. Frontend blocked-task listeleme + tek-buton resolve, seçimsiz
+    onay, concurrency'nin backend'de olması (frontend version göndermez), stale/çakışmanın otomatik
+    retry edilmemesi, global assignment'ın değişmemesi ve frontend authz'ın UX-only olması doğrulandı.
+    Backend/migration DEĞİŞMEDİ; alembic head 0011; release_verify tüm kapılar yeşil.
+  expires_at: 2026-12-01
+  affected_stories: [FP-FE-004]
+  binding_rule: >
+    Engellenen görev frontend'i resolve endpoint'ini KULLANICI SEÇİMİ OLMADAN çağırır (backend adayı
+    mevcut aktif rol atamasından seçer; frontend user_id/version/idempotency göndermez, sahte aday/
+    version üretmez). Görünürlük UX-only; backend policy tek kaynak (owner/admin; member 403; cross-
+    tenant 404). Resolve yalnız seçili görevi etkiler; global approval-role assignment değişmez; UI
+    approve/reject sunmaz. Her 409'da liste tazelenir, otomatik retry yok; ham backend detay'ı
+    gösterilmez, güvenli sabit mesajlara sınıflandırılır. Talep başlığı/e-posta backend'den gelmediği
+    için requester e-postası üye listesinden eşlenir (yoksa "Bilinmiyor"), talep kısa ID gösterilir.
+    Hassas identity gösterilmez/loglanmaz; veri browser storage'a yazılmaz. Aday-seçim UI, approve/
+    reject, genel reassignment, e-posta teslimi ve hosting kapsam dışıdır.
+  reference: apps/web/src/features/blocked-tasks/actions.ts
 ```

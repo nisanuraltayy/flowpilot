@@ -4,6 +4,7 @@ import type { ComponentType } from "react";
 
 import {
   ApprovalRoleIcon,
+  BlockedTaskIcon,
   DocumentsIcon,
   InboxIcon,
   MemberIcon,
@@ -19,7 +20,8 @@ export type NavKey =
   | "inbox"
   | "members"
   | "invitations"
-  | "approval-roles";
+  | "approval-roles"
+  | "blocked-tasks";
 
 export interface NavItem {
   readonly key: NavKey;
@@ -54,6 +56,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/settings/team/approval-roles",
     label: "Onay Rolleri",
     Icon: ApprovalRoleIcon,
+    requiresManage: true,
+  },
+  {
+    key: "blocked-tasks",
+    href: "/settings/team/blocked-approval-tasks",
+    label: "Engellenen Onaylar",
+    Icon: BlockedTaskIcon,
     requiresManage: true,
   },
 ];

@@ -40,4 +40,13 @@ describe("visibleNavItems", () => {
     expect(ar?.requiresManage).toBe(true);
     expect(ar?.href).toBe("/settings/team/approval-roles");
   });
+
+  it("yönetici için Engellenen Onaylar bağlantısı görünür; member için gizli", () => {
+    expect(visibleNavItems(true).map((i) => i.key)).toContain("blocked-tasks");
+    expect(visibleNavItems(false).map((i) => i.key)).not.toContain("blocked-tasks");
+    const bt = NAV_ITEMS.find((i) => i.key === "blocked-tasks");
+    expect(bt?.requiresManage).toBe(true);
+    expect(bt?.href).toBe("/settings/team/blocked-approval-tasks");
+    expect(bt?.label).toBe("Engellenen Onaylar");
+  });
 });
