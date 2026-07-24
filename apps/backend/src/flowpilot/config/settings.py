@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     log_level: LogLevel = "info"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
+    # TrustedHost allowlist'i (FP-OPS-003A). SECRET DEĞİLDİR. Virgülle ayrılmış
+    # host listesi; `*.example.com` alt-domain wildcard'ı desteklenir. Staging/
+    # production'da zorunludur ve bare `*` reddedilir (composition root doğrular).
+    # Local/test/development'ta boş bırakılırsa TrustedHost middleware eklenmez.
+    api_trusted_hosts: str | None = None
     # Frontend public base URL — davet kabul linki (accept_url) bundan üretilir.
     # HARD-CODE EDİLMEZ; env'den gelir. Yoksa relative path (host'suz) üretilir —
     # sahte localhost/tunnel adresi yazılmaz.
@@ -63,6 +68,22 @@ class Settings(BaseSettings):
     supabase_jwt_allowed_algorithms: str = "RS256,ES256"
     supabase_jwks_cache_seconds: int = Field(default=300, ge=1)
     supabase_jwks_timeout_seconds: float = Field(default=5.0, gt=0)
+
+    @property
+    def trusted_host_allowlist(self) -> tuple[str, ...]:
+        """`API_TRUSTED_HOSTS` değerini deterministik çözümler.
+
+        Virgülle böler, whitespace temizler, boş öğeleri atar, lowercase
+        normalize eder ve duplicate'leri İLK GÖRÜLME sırasını koruyarak kaldırır
+        (WORKER_TENANT_IDS ile aynı parsing sözleşmesi).
+        """
+        raw = self.api_trusted_hosts or ""
+        seen: dict[str, None] = {}
+        for item in raw.split(","):
+            host = item.strip().lower()
+            if host and host not in seen:
+                seen[host] = None
+        return tuple(seen)
 
     @property
     def supabase_issuer(self) -> str | None:
