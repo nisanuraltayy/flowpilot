@@ -6,22 +6,33 @@ doğrular. Network, Docker veya PostgreSQL GEREKTİRMEZ.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
 from flowpilot.worker.__main__ import (
+    _DEFAULT_HEARTBEAT_MAX_AGE_SECONDS,
     _DEFAULT_POLL_INTERVAL_SECONDS,
+    _HEARTBEAT_MAX_AGE_ENV_VAR,
+    _HEARTBEAT_PATH_ENV_VAR,
     CHECK_OK_MESSAGE,
+    HeartbeatError,
     IntervalError,
     _GracefulStop,
     _serve_loop,
+    check_heartbeat,
     main,
     parse_tenant_allowlist,
+    read_heartbeat_age,
+    resolve_heartbeat_max_age,
     resolve_poll_interval,
     resolve_serve_tenants,
+    write_heartbeat,
 )
 
 _T1 = "00000000-0000-0000-0000-000000000001"
@@ -64,7 +75,10 @@ def test_missing_mode_flag_fails_in_controlled_way(capsys: pytest.CaptureFixture
 
     assert exc_info.value.code == 2
     captured = capsys.readouterr()
-    assert "one of the arguments --check --run-once --run --serve is required" in captured.err
+    assert (
+        "one of the arguments --check --run-once --run --serve --check-heartbeat is required"
+        in captured.err
+    )
     assert CHECK_OK_MESSAGE not in captured.out
 
 
@@ -370,6 +384,276 @@ def test_serve_loop_with_no_tenants_does_nothing() -> None:
     )
 
 
+# --------------------------------------------------------------- heartbeat yazımı
+
+_NOW = datetime(2026, 7, 24, 10, 0, 0, tzinfo=UTC)
+
+
+def test_heartbeat_write_creates_utc_timestamp(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+
+    write_heartbeat(str(target), now=_NOW)
+
+    stamped = datetime.fromisoformat(target.read_text(encoding="utf-8"))
+    assert stamped == _NOW
+    assert stamped.tzinfo is not None  # naive damga YASAK
+
+
+def test_heartbeat_write_creates_missing_parent_directory(tmp_path: Path) -> None:
+    target = tmp_path / "nested" / "dir" / "beat"
+
+    write_heartbeat(str(target), now=_NOW)
+
+    assert target.is_file()
+
+
+def test_heartbeat_write_leaves_no_temporary_file_behind(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+
+    write_heartbeat(str(target), now=_NOW)
+
+    # Atomik yazım: geçici dosya yer değiştirme sonrası KALMAZ (yarım okuma olmaz).
+    assert [p.name for p in tmp_path.iterdir()] == ["beat"]
+
+
+def test_heartbeat_write_overwrites_previous_stamp(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+    write_heartbeat(str(target), now=_NOW)
+
+    later = _NOW + timedelta(seconds=30)
+    write_heartbeat(str(target), now=later)
+
+    assert datetime.fromisoformat(target.read_text(encoding="utf-8")) == later
+
+
+def test_heartbeat_content_contains_only_timestamp(tmp_path: Path) -> None:
+    """Heartbeat dosyası secret/tenant/PII TAŞIMAZ — yalnız zaman damgası."""
+    target = tmp_path / "beat"
+
+    write_heartbeat(str(target), now=_NOW)
+
+    assert target.read_text(encoding="utf-8").strip() == _NOW.isoformat()
+
+
+def test_heartbeat_age_is_measured_from_stamp(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+    write_heartbeat(str(target), now=_NOW)
+
+    age = read_heartbeat_age(str(target), now=_NOW + timedelta(seconds=12))
+
+    assert age == pytest.approx(12.0)
+
+
+def test_heartbeat_age_rejects_unreadable_file(tmp_path: Path) -> None:
+    with pytest.raises(HeartbeatError):
+        read_heartbeat_age(str(tmp_path / "yok"), now=_NOW)
+
+
+def test_heartbeat_age_rejects_corrupt_stamp(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+    target.write_text("not-a-timestamp", encoding="utf-8")
+
+    with pytest.raises(HeartbeatError):
+        read_heartbeat_age(str(target), now=_NOW)
+
+
+# ------------------------------------------------------- heartbeat tazelik eşiği
+
+
+def test_heartbeat_max_age_uses_default_when_absent() -> None:
+    assert resolve_heartbeat_max_age(None) == _DEFAULT_HEARTBEAT_MAX_AGE_SECONDS
+    assert resolve_heartbeat_max_age("  ") == _DEFAULT_HEARTBEAT_MAX_AGE_SECONDS
+
+
+def test_heartbeat_max_age_reads_environment_value() -> None:
+    assert resolve_heartbeat_max_age("15") == 15.0
+
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-1", "0.05", "nan", "inf"])
+def test_heartbeat_max_age_rejects_invalid_values(raw: str) -> None:
+    with pytest.raises(HeartbeatError):
+        resolve_heartbeat_max_age(raw)
+
+
+def test_heartbeat_max_age_error_names_variable_without_leaking_value() -> None:
+    with pytest.raises(HeartbeatError) as excinfo:
+        resolve_heartbeat_max_age("gizli-deger")
+
+    assert _HEARTBEAT_MAX_AGE_ENV_VAR in str(excinfo.value)
+    assert "gizli-deger" not in str(excinfo.value)
+
+
+# ------------------------------------------------------------ --check-heartbeat
+
+
+def test_check_heartbeat_returns_zero_for_fresh_stamp(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+    write_heartbeat(str(target), now=_NOW)
+
+    exit_code, message = check_heartbeat(
+        str(target), max_age_seconds=60.0, now=_NOW + timedelta(seconds=10)
+    )
+
+    assert exit_code == 0
+    assert "taze" in message
+
+
+def test_check_heartbeat_returns_one_for_stale_stamp(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+    write_heartbeat(str(target), now=_NOW)
+
+    exit_code, _ = check_heartbeat(
+        str(target), max_age_seconds=60.0, now=_NOW + timedelta(seconds=61)
+    )
+
+    assert exit_code == 1
+
+
+def test_check_heartbeat_accepts_age_exactly_at_threshold(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+    write_heartbeat(str(target), now=_NOW)
+
+    exit_code, _ = check_heartbeat(
+        str(target), max_age_seconds=60.0, now=_NOW + timedelta(seconds=60)
+    )
+
+    assert exit_code == 0
+
+
+def test_check_heartbeat_returns_one_when_path_is_not_configured() -> None:
+    """Yapılandırılmamış heartbeat sessizce 'sağlıklı' SAYILMAZ."""
+    for path in (None, "", "   "):
+        exit_code, message = check_heartbeat(path, max_age_seconds=60.0, now=_NOW)
+        assert exit_code == 1
+        assert _HEARTBEAT_PATH_ENV_VAR in message
+
+
+def test_check_heartbeat_returns_one_when_file_is_missing(tmp_path: Path) -> None:
+    exit_code, _ = check_heartbeat(str(tmp_path / "yok"), max_age_seconds=60.0, now=_NOW)
+
+    assert exit_code == 1
+
+
+def test_check_heartbeat_message_carries_no_secret(tmp_path: Path) -> None:
+    target = tmp_path / "beat"
+    write_heartbeat(str(target), now=_NOW)
+
+    _, message = check_heartbeat(str(target), max_age_seconds=60.0, now=_NOW)
+
+    assert "password" not in message.lower()
+    assert "postgresql" not in message.lower()
+
+
+def test_check_heartbeat_cli_mode_exits_one_when_unconfigured(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(_HEARTBEAT_PATH_ENV_VAR, raising=False)
+
+    exit_code = main(["--check-heartbeat"])
+
+    assert exit_code == 1
+    assert _HEARTBEAT_PATH_ENV_VAR in capsys.readouterr().out
+
+
+def test_check_heartbeat_cli_mode_exits_zero_for_fresh_stamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "beat"
+    write_heartbeat(str(target), now=datetime.now(UTC))
+    monkeypatch.setenv(_HEARTBEAT_PATH_ENV_VAR, str(target))
+    monkeypatch.setenv(_HEARTBEAT_MAX_AGE_ENV_VAR, "60")
+
+    assert main(["--check-heartbeat"]) == 0
+
+
+def test_check_heartbeat_cli_mode_rejects_invalid_max_age(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv(_HEARTBEAT_PATH_ENV_VAR, str(tmp_path / "beat"))
+    monkeypatch.setenv(_HEARTBEAT_MAX_AGE_ENV_VAR, "-5")
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--check-heartbeat"])
+
+    assert excinfo.value.code == 2
+    assert _HEARTBEAT_MAX_AGE_ENV_VAR in capsys.readouterr().err
+
+
+def test_check_heartbeat_mode_is_mutually_exclusive_with_serve(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["--check-heartbeat", "--serve", "--tenant", _T1])
+
+    assert "not allowed with" in capsys.readouterr().err
+
+
+# -------------------------------------------------- heartbeat servis loop entegrasyonu
+
+
+def test_serve_loop_beats_before_first_sweep_and_after_each_cycle() -> None:
+    beats: list[str] = []
+    order: list[str] = []
+
+    def dispatch(tenant_id: UUID) -> None:
+        order.append("dispatch")
+
+    def heartbeat() -> None:
+        order.append("beat")
+        beats.append("beat")
+
+    _serve_loop(
+        tenant_ids=[UUID(_T1), UUID(_T2)],
+        dispatch=dispatch,
+        stop=_GracefulStop(),
+        interval=0.0,
+        max_cycles=2,
+        heartbeat=heartbeat,
+    )
+
+    # Süreç ayağa kalkar kalkmaz bir damga atılır (ilk sweep beklenmez),
+    # sonra HER sweep sonunda bir damga daha atılır.
+    assert order[0] == "beat"
+    assert len(beats) == 3
+    assert order == ["beat", "dispatch", "dispatch", "beat", "dispatch", "dispatch", "beat"]
+
+
+def test_serve_loop_continues_when_heartbeat_write_fails() -> None:
+    """Heartbeat yazımı BAŞARISIZ olsa bile dispatch DURMAZ."""
+    processed: list[UUID] = []
+
+    def heartbeat() -> None:
+        raise OSError("disk dolu")
+
+    cycles = _serve_loop(
+        tenant_ids=[UUID(_T1), UUID(_T2)],
+        dispatch=processed.append,
+        stop=_GracefulStop(),
+        interval=0.0,
+        max_cycles=2,
+        heartbeat=heartbeat,
+    )
+
+    assert cycles == 2
+    assert len(processed) == 4
+
+
+def test_serve_loop_runs_unchanged_when_heartbeat_is_not_configured() -> None:
+    """Heartbeat opsiyoneldir: verilmezse döngü davranışı DEĞİŞMEZ."""
+    processed: list[UUID] = []
+
+    cycles = _serve_loop(
+        tenant_ids=[UUID(_T1), UUID(_T2)],
+        dispatch=processed.append,
+        stop=_GracefulStop(),
+        interval=0.0,
+        max_cycles=2,
+    )
+
+    assert cycles == 2
+    assert len(processed) == 4
+
+
 def test_module_entrypoint_runs_as_subprocess_and_exits_zero() -> None:
     # `python -m flowpilot.worker --check` gerçekten çalışır ve ASILI KALMAZ.
     result = subprocess.run(
@@ -382,3 +666,28 @@ def test_module_entrypoint_runs_as_subprocess_and_exits_zero() -> None:
 
     assert result.returncode == 0, result.stderr
     assert CHECK_OK_MESSAGE in result.stdout
+
+
+def test_check_heartbeat_subprocess_exits_one_without_touching_database(
+    tmp_path: Path,
+) -> None:
+    """Healthcheck komutu gerçekten çalışır, ASILI KALMAZ ve DB'ye DOKUNMAZ."""
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        _HEARTBEAT_PATH_ENV_VAR: str(tmp_path / "beat"),
+        # Kasten GEÇERSİZ DSN: healthcheck DB'ye bağlanmaya çalışsaydı bu görünürdü.
+        "DATABASE_URL": "postgresql+psycopg://invalid:invalid@127.0.0.1:1/none",
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "flowpilot.worker", "--check-heartbeat"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 1, result.stderr
+    assert _HEARTBEAT_PATH_ENV_VAR in result.stdout
+    assert "Traceback" not in result.stderr

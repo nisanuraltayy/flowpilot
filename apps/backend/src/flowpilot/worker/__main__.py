@@ -34,6 +34,15 @@ Modlar:
         Worker cross-tenant KEŞİF YAPMAZ: `flowpilot_app` NOBYPASSRLS'tir ve her
         tenant kendi RLS context'inde işlenir.
 
+        `WORKER_HEARTBEAT_PATH` verilmişse process-level heartbeat AÇIKTIR: süreç
+        ayağa kalkınca ve HER sweep sonunda dosyaya UTC zaman damgası atomik yazılır.
+        Heartbeat yazımı BAŞARISIZ OLURSA loglanır ama dispatch'i DURDURMAZ.
+
+    python -m flowpilot.worker --check-heartbeat
+        Container healthcheck modu: `WORKER_HEARTBEAT_PATH` içindeki damganın yaşı
+        `WORKER_HEARTBEAT_MAX_AGE_SECONDS` sınırındaysa exit 0, değilse exit 1.
+        Worker loop BAŞLATMAZ, database bağlantısı KURMAZ, dosyaya YAZMAZ.
+
 Kurallar (ADR-003/006/007, .claude/rules): iş mantığı YOK — yalnız application
 sınırını (`WorkflowRuntimeService.run_dispatch_pass`) çağırır. BYPASSRLS rolü
 kullanmaz (flowpilot_app). Secret/token loglamaz. In-memory timer yoktur.
@@ -50,10 +59,13 @@ import signal
 import sys
 import time
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 from types import FrameType
 from uuid import UUID
 
 from flowpilot.config.settings import Settings, get_settings
+from flowpilot.shared.clock import SystemClock
 from flowpilot.worker.wiring import build_runtime
 
 CHECK_OK_MESSAGE = "flowpilot.worker check ok"
@@ -70,6 +82,14 @@ _INTERVAL_ENV_VAR = "WORKER_POLL_INTERVAL_SECONDS"
 _MIN_POLL_INTERVAL_SECONDS = 0.1
 # CLI ve environment yoksa kullanılan mevcut güvenli default (davranış değişmedi).
 _DEFAULT_POLL_INTERVAL_SECONDS = 1.0
+
+# Process-level heartbeat: servis modu her sweep sonunda dosyaya UTC zaman damgası
+# yazar; `--check-heartbeat` bu damganın tazeliğine bakar. Secret DEĞİLDİR.
+# Yol verilmezse heartbeat KAPALIDIR (dosya yazılmaz) — sürpriz dosya oluşmaz.
+_HEARTBEAT_PATH_ENV_VAR = "WORKER_HEARTBEAT_PATH"
+_HEARTBEAT_MAX_AGE_ENV_VAR = "WORKER_HEARTBEAT_MAX_AGE_SECONDS"
+_DEFAULT_HEARTBEAT_MAX_AGE_SECONDS = 60.0
+_MIN_HEARTBEAT_MAX_AGE_SECONDS = 0.1
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -100,6 +120,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "Production servis modu: açık tenant allowlist'i üzerinde STABİL sırayla "
             f"sürekli dispatch. Tenant'lar --tenant (tekrarlanabilir) veya {_TENANT_ENV_VAR} "
             "ile verilir. Her sweep aynı sırayı kullanır; SIGTERM/SIGINT'te graceful durur."
+        ),
+    )
+    mode.add_argument(
+        "--check-heartbeat",
+        action="store_true",
+        help=(
+            f"Heartbeat tazeliğini doğrula, çık (container healthcheck için). "
+            f"{_HEARTBEAT_PATH_ENV_VAR} okunur; tazeyse 0, bayat/eksikse 1 döner. "
+            "Worker loop BAŞLATMAZ, database bağlantısı KURMAZ."
         ),
     )
     parser.add_argument(
@@ -242,6 +271,82 @@ def resolve_poll_interval(cli_value: float | None, env_value: str | None) -> flo
     return _validate_interval(parsed)
 
 
+class HeartbeatError(ValueError):
+    """Geçersiz heartbeat yapılandırması. Mesaj yalnız değişken adı + kategori taşır."""
+
+
+def resolve_heartbeat_max_age(env_value: str | None) -> float:
+    """Heartbeat tazelik eşiği (saniye). Doğrulanır; yoksa güvenli default."""
+    raw = (env_value or "").strip()
+    if not raw:
+        return _DEFAULT_HEARTBEAT_MAX_AGE_SECONDS
+    try:
+        parsed = float(raw)
+    except ValueError as exc:
+        raise HeartbeatError(f"{_HEARTBEAT_MAX_AGE_ENV_VAR} sayısal bir değer olmalıdır") from exc
+    if not math.isfinite(parsed):
+        raise HeartbeatError(f"{_HEARTBEAT_MAX_AGE_ENV_VAR} sonlu bir sayı olmalıdır")
+    if parsed < _MIN_HEARTBEAT_MAX_AGE_SECONDS:
+        raise HeartbeatError(
+            f"{_HEARTBEAT_MAX_AGE_ENV_VAR} en az {_MIN_HEARTBEAT_MAX_AGE_SECONDS} saniye olmalıdır"
+        )
+    return parsed
+
+
+def write_heartbeat(path: str, *, now: datetime) -> None:
+    """Heartbeat damgasını ATOMİK yazar (geçici dosya + `os.replace`).
+
+    Yarım okunan dosya oluşmaz. İçerik yalnız UTC ISO-8601 zaman damgasıdır;
+    secret/PII İÇERMEZ.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Geçici dosya HEDEFLE AYNI dizinde: `os.replace` yalnız aynı dosya sisteminde atomiktir.
+    temporary = target.with_name(f"{target.name}.tmp")
+    temporary.write_text(now.astimezone(UTC).isoformat(), encoding="utf-8")
+    os.replace(temporary, target)  # aynı dizin içinde atomik yer değiştirme
+
+
+def read_heartbeat_age(path: str, *, now: datetime) -> float:
+    """Heartbeat damgasının yaşını saniye olarak döndürür.
+
+    Dosya yoksa/okunamıyorsa veya damga çözümlenemiyorsa `HeartbeatError` yükseltir.
+    """
+    try:
+        raw = Path(path).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise HeartbeatError(
+            f"{_HEARTBEAT_PATH_ENV_VAR} ile verilen dosya okunamadı (henüz yazılmamış olabilir)"
+        ) from exc
+    try:
+        stamped = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise HeartbeatError(
+            f"{_HEARTBEAT_PATH_ENV_VAR} geçerli bir zaman damgası içermiyor"
+        ) from exc
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=UTC)
+    return (now.astimezone(UTC) - stamped.astimezone(UTC)).total_seconds()
+
+
+def check_heartbeat(path: str | None, *, max_age_seconds: float, now: datetime) -> tuple[int, str]:
+    """`--check-heartbeat` sonucu: (exit_code, tek satırlık mesaj).
+
+    0 → heartbeat taze; 1 → yapılandırılmamış, okunamıyor veya bayat. Worker loop
+    BAŞLATILMAZ ve database bağlantısı KURULMAZ.
+    """
+    resolved = (path or "").strip()
+    if not resolved:
+        return 1, f"heartbeat kapalı: {_HEARTBEAT_PATH_ENV_VAR} tanımlı değil"
+    try:
+        age = read_heartbeat_age(resolved, now=now)
+    except HeartbeatError as exc:
+        return 1, f"heartbeat kullanılamıyor: {exc}"
+    if age > max_age_seconds:
+        return 1, f"heartbeat bayat: yaş {age:.1f}s > izin verilen {max_age_seconds:.1f}s"
+    return 0, f"heartbeat taze: yaş {age:.1f}s <= izin verilen {max_age_seconds:.1f}s"
+
+
 def resolve_serve_tenants(cli_values: Sequence[str] | None, env_value: str | None) -> list[UUID]:
     """Servis modu tenant allowlist'i: CLI verilmişse CLI, aksi hâlde environment.
 
@@ -260,6 +365,7 @@ def _serve_loop(
     stop: _GracefulStop,
     interval: float,
     max_cycles: int | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> int:
     """Tenant'lar üzerinde STABİL sıralı sürekli dispatch döngüsü.
 
@@ -278,9 +384,19 @@ def _serve_loop(
     if not tenant_ids:
         return 0
 
+    def _beat() -> None:
+        # Heartbeat hatası worker'ı ÖLDÜRMEZ: izleme, işin kendisini engellemez.
+        if heartbeat is None:
+            return
+        try:
+            heartbeat()
+        except Exception as exc:
+            _log("worker.heartbeat_failed", error_type=type(exc).__name__)
+
     # Sweep sırasında listenin değişmemesi için tek seferlik anlık görüntü.
     sweep_order = tuple(tenant_ids)
     cycles = 0
+    _beat()  # süreç ayağa kalktı: ilk sweep beklenmeden canlılık bildirilir
     while not stop.stopping and (max_cycles is None or cycles < max_cycles):
         for tenant_id in sweep_order:
             if stop.stopping:
@@ -295,6 +411,7 @@ def _serve_loop(
                     error_type=type(exc).__name__,
                 )
         cycles += 1
+        _beat()  # her sweep sonunda tazelenir
         if not stop.stopping and (max_cycles is None or cycles < max_cycles):
             _sleep_interruptibly(interval, stop)
     return cycles
@@ -307,14 +424,24 @@ def _run_serve(
     worker_id: str,
     interval: float,
     limit: int,
+    heartbeat_path: str | None = None,
 ) -> int:
-    """Servis modu: sinyal kaydı + runtime wiring + adil döngü. Tur sayısını döner."""
+    """Servis modu: sinyal kaydı + runtime wiring + stabil döngü. Tur sayısını döner."""
     stop = _GracefulStop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, stop.request)
 
+    clock = SystemClock()
+    path = (heartbeat_path or "").strip()
+    heartbeat = (lambda: write_heartbeat(path, now=clock.now())) if path else None
+
     wiring = build_runtime(settings)
-    _log("worker.serve_started", tenant_count=len(tenant_ids), worker_id=worker_id)
+    _log(
+        "worker.serve_started",
+        tenant_count=len(tenant_ids),
+        worker_id=worker_id,
+        heartbeat_enabled=heartbeat is not None,
+    )
     try:
         cycles = _serve_loop(
             tenant_ids=tenant_ids,
@@ -323,6 +450,7 @@ def _run_serve(
             ),
             stop=stop,
             interval=interval,
+            heartbeat=heartbeat,
         )
     finally:
         wiring.dispose()
@@ -349,6 +477,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(run_check(settings))  # CLI çıktısı: worker check sonucu
         return 0
 
+    if args.check_heartbeat:
+        try:
+            max_age = resolve_heartbeat_max_age(os.environ.get(_HEARTBEAT_MAX_AGE_ENV_VAR))
+        except HeartbeatError as exc:
+            parser.error(str(exc))
+        exit_code, message = check_heartbeat(
+            os.environ.get(_HEARTBEAT_PATH_ENV_VAR),
+            max_age_seconds=max_age,
+            now=SystemClock().now(),
+        )
+        print(message)  # CLI çıktısı: healthcheck sonucu (secret içermez)
+        return exit_code
+
     if args.serve:
         try:
             tenant_ids = resolve_serve_tenants(args.tenant, os.environ.get(_TENANT_ENV_VAR))
@@ -370,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             worker_id=args.worker_id,
             interval=interval,
             limit=args.limit,
+            heartbeat_path=os.environ.get(_HEARTBEAT_PATH_ENV_VAR),
         )
         return 0
 

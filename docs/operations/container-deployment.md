@@ -15,8 +15,14 @@
 |---|---|---|---|
 | API (FastAPI) | `apps/backend` | `apps/backend/Dockerfile` | `uvicorn flowpilot.api.main:app` |
 | Web (Next.js) | `apps/web` | `apps/web/Dockerfile` | `node server.js` (standalone) |
-| Worker | — | **YOK (bilinçli)** | Worker sürekli servis modu **FP-OPS-002** kapsamındadır |
+| Worker | `apps/backend` | `apps/backend/Dockerfile` — **`--target worker`** | `python -m flowpilot.worker --serve` |
 | PostgreSQL | — | Managed servis | Container içinde **tutulmaz** (bkz. §8) |
+
+API ve worker **aynı image ailesindendir**: tek Python distribution'ın iki composition
+root'u (ADR-009), ortak `runtime` katmanını paylaşırlar. `api` stage'i Dockerfile'ın
+**en sonundadır**, bu yüzden `--target` verilmeden yapılan build **API** üretir; worker
+hiçbir koşulda default process değildir. İkisi **ayrı servis** olarak çalıştırılır —
+tek container'da birleştirilmez.
 
 Her iki context de **kendi kendine yeterlidir**: `apps/backend` tek Python distribution'dır
 (ADR-009), `apps/web` kendi `package.json` + `package-lock.json`'ına sahiptir. Monorepo
@@ -26,6 +32,10 @@ kökünü build context yapmaya gerek yoktur.
 
 ```bash
 docker build -t flowpilot-api:<tag> apps/backend
+```
+
+```bash
+docker build -t flowpilot-worker:<tag> --target worker apps/backend
 ```
 
 ```bash
@@ -52,6 +62,18 @@ docker run -d --name flowpilot-api -p 8000:8000 \
 ```
 
 ```bash
+docker run -d --name flowpilot-worker \
+  -e APP_ENVIRONMENT=production \
+  -e DATABASE_URL=<app-role-connection-string> \
+  -e WORKER_TENANT_IDS=<tenant-uuid[,tenant-uuid...]> \
+  flowpilot-worker:<tag>
+```
+
+Worker **HTTP portu dinlemez** (`-p` yoktur) ve `WORKER_TENANT_IDS` boşsa **kontrollü hata**
+ile çıkar — sessizce boş çalışmaz. Worker cross-tenant keşif yapmaz: uygulama rolü
+`flowpilot_app` NOBYPASSRLS'tir, bu yüzden işlenecek tenant'lar **açıkça** verilir.
+
+```bash
 docker run -d --name flowpilot-web -p 3000:3000 \
   -e FLOWPILOT_API_BASE_URL=<api-base-url> \
   flowpilot-web:<tag>
@@ -71,6 +93,24 @@ Her ikisi de `0.0.0.0` dinler ve **non-root** çalışır (API uid `10001`, Web 
 | `SUPABASE_URL` | ✅ | JWKS/issuer bundan türetilir |
 | `APP_DEBUG` | — | staging/production'da `true` **reddedilir** (§6) |
 | `APP_PORT`, `LOG_LEVEL`, `FRONTEND_BASE_URL` | — | Davet linki için `FRONTEND_BASE_URL` önerilir |
+
+### Worker (runtime)
+
+| Değişken | Zorunlu | Not |
+|---|---|---|
+| `APP_ENVIRONMENT` | ✅ | API ile aynı strict doğrulama |
+| `DATABASE_URL` | ✅ | Uygulama rolü `flowpilot_app` (BYPASSRLS **yok**) |
+| `WORKER_TENANT_IDS` | ✅ | Virgülle ayrılmış tenant UUID allowlist'i; boşsa süreç başlamaz |
+| `WORKER_POLL_INTERVAL_SECONDS` | — | Sweep'ler arası bekleme; default `1.0`, minimum `0.1` |
+| `WORKER_HEARTBEAT_PATH` | — | Image'da default tanımlı; **boşsa healthcheck sağlıksız döner** |
+| `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | — | Tazelik eşiği; default `60`. Poll interval + en uzun sweep'ten **büyük** seçilir |
+
+Worker'ın liveness'i HTTP ile ölçülemez (port yok). Bunun yerine süreç ayağa kalkarken ve
+**her sweep sonunda** heartbeat dosyasına UTC damga yazar; container healthcheck'i
+`python -m flowpilot.worker --check-heartbeat` ile bu damganın **yaşına** bakar — worker
+loop başlatmaz ve **database'e dokunmaz**. Heartbeat dosyası yalnız zaman damgası içerir
+(secret/tenant/PII yok) ve kalıcı volume gerektirmez. Heartbeat yazımı başarısız olursa
+loglanır ama **dispatch durmaz**.
 
 ### Web (runtime)
 
@@ -137,8 +177,8 @@ networking sunuyorsa API private tutulabilir.
 
 | Konu | Nereye ait |
 |---|---|
-| Worker container/servis modu | **FP-OPS-002** (worker şu an `--tenant` + sınırlı `--max-passes` ister) |
-| Gerçek readiness (`/health/ready` bağımlılık kontrolü) | **FP-OPS-002** — bu yüzden container healthcheck'i yalnız `/health/live` kullanır |
+| Worker otomatik ölçekleme / birden çok replika koordinasyonu | Sağlayıcı katmanı (outbox `FOR UPDATE SKIP LOCKED` çoklu worker'a hazırdır) |
+| Readiness'in container healthcheck'i olarak kullanılması | Bilinçli DEĞİL: geçici database kesintisi sağlıklı API sürecini öldürmemeli; readiness platform trafik kararına aittir |
 | Güvenlik header'ları, CORS, rate limiting | **FP-OPS-003** |
 | Hata izleme, e-posta, metrik | FP-OPS-004 ve sonrası |
 | Sağlayıcı seçimi / manifest | ADR-010 kapsamı — **değiştirilmedi** |
