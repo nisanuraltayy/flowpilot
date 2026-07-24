@@ -7,6 +7,7 @@ sözleşmesinin (non-root, startup'ta migration yok, dev server yok) korunması.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -102,3 +103,53 @@ def test_web_dockerfile_deployment_contract() -> None:
 def test_web_next_config_uses_standalone_output() -> None:
     content = _read(_WEB / "next.config.ts")
     assert '"standalone"' in content or "'standalone'" in content
+
+
+def _git_tracked_modes(pattern: str) -> dict[str, str]:
+    """git'in KAYITLI dosya modlarını döndürür ({yol: mode}); git yoksa boş sözlük.
+
+    Filesystem yerine git modu okunur: Windows'ta POSIX executable biti yoktur, bu
+    yüzden yalnız dosya sistemine bakan bir kontrol bu sınıf hatayı YAKALAYAMAZ.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-s", "--", pattern],  # noqa: S607 — sabit git komutu
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):  # pragma: no cover - git yoksa
+        return {}
+    if result.returncode != 0 or not result.stdout.strip():
+        return {}
+    modes: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if parts and path:
+            modes[path.strip()] = parts[0]
+    return modes
+
+
+def test_shebang_scripts_are_committed_executable() -> None:
+    """Shebang'li script'ler git'te 100755 olmalı (Linux CI: ruff EXE001).
+
+    REGRESYON: Windows'ta ruff EXE001'i değerlendiremediği için shebang'li ama
+    executable OLMAYAN bir script local'de sessizce geçer, Linux CI'da patlar.
+    """
+    modes = _git_tracked_modes("scripts/*.py")
+    if not modes:  # git checkout değil (ör. sdist / git archive) → doğrulanamaz
+        pytest.skip("git kayıtlı dosya modları okunamadı (git checkout değil)")
+
+    for path, mode in sorted(modes.items()):
+        script = _REPO_ROOT / path
+        if not script.is_file():
+            continue
+        first_line = script.read_text(encoding="utf-8").splitlines()[:1]
+        if first_line and first_line[0].startswith("#!"):
+            assert mode == "100755", (
+                f"{path} shebang iceriyor ama git modu {mode} "
+                "(Linux CI'da ruff EXE001 hatasi verir; 100755 olmali)"
+            )
