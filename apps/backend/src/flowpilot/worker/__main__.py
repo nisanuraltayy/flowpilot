@@ -14,6 +14,18 @@ Modlar:
         graceful durur. `--max-passes 0` sınırsız değildir → reddedilir (sonsuz
         busy loop YASAK; kontrollü bir üst sınır zorunludur).
 
+    python -m flowpilot.worker --serve --tenant <uuid> [--tenant <uuid> ...]
+        PRODUCTION servis modu: açık tenant allowlist'i üzerinde ADİL (round-robin)
+        sürekli dispatch. Tenant'lar `--tenant` (tekrarlanabilir) veya
+        `WORKER_TENANT_IDS` (virgülle ayrılmış) ile verilir; CLI verilmişse CLI
+        geçerlidir. Hiç tenant yoksa kontrollü hata verir (sessizce boş çalışmaz).
+        Bir tenant'ın turu hata verirse loglanır ve döngü diğer tenant'larla DEVAM
+        eder (tenant hata izolasyonu). Turlar arası `--interval` beklenir (busy-spin
+        yok) ve SIGTERM/SIGINT'te graceful durur.
+
+        Worker cross-tenant KEŞİF YAPMAZ: `flowpilot_app` NOBYPASSRLS'tir ve her
+        tenant kendi RLS context'inde işlenir.
+
 Kurallar (ADR-003/006/007, .claude/rules): iş mantığı YOK — yalnız application
 sınırını (`WorkflowRuntimeService.run_dispatch_pass`) çağırır. BYPASSRLS rolü
 kullanmaz (flowpilot_app). Secret/token loglamaz. In-memory timer yoktur.
@@ -24,10 +36,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import signal
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import FrameType
 from uuid import UUID
 
@@ -36,6 +49,14 @@ from flowpilot.worker.wiring import build_runtime
 
 CHECK_OK_MESSAGE = "flowpilot.worker check ok"
 _LOGGER = logging.getLogger("flowpilot.worker")
+
+# Açık tenant allowlist'i. Worker HİÇBİR ayrıcalıklı cross-tenant sorgu yapmaz:
+# `flowpilot_app` NOBYPASSRLS'tir ve repository'de güvenli global tenant registry
+# YOKTUR. Bu yüzden servis modunda işlenecek tenant'lar AÇIKÇA yapılandırılır.
+_TENANT_ENV_VAR = "WORKER_TENANT_IDS"
+
+# Servis modunda turlar arası en küçük bekleme: busy-spin YASAK.
+_MIN_SERVE_INTERVAL_SECONDS = 0.05
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -59,7 +80,25 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Kontrollü döngü (--tenant ve --max-passes zorunlu).",
     )
-    parser.add_argument("--tenant", type=str, default=None, help="Tenant UUID (dispatch scope).")
+    mode.add_argument(
+        "--serve",
+        action="store_true",
+        help=(
+            "Production servis modu: açık tenant allowlist'i üzerinde adil (round-robin) "
+            f"sürekli dispatch. Tenant'lar --tenant (tekrarlanabilir) veya {_TENANT_ENV_VAR} "
+            "ile verilir. SIGTERM/SIGINT'te graceful durur."
+        ),
+    )
+    parser.add_argument(
+        "--tenant",
+        action="append",
+        default=None,
+        metavar="UUID",
+        help=(
+            "Tenant UUID (dispatch scope). --run-once/--run için TEK değer; "
+            "--serve için tekrarlanabilir."
+        ),
+    )
     parser.add_argument("--worker-id", type=str, default="workflow-runtime-worker")
     parser.add_argument("--max-passes", type=int, default=1)
     parser.add_argument("--interval", type=float, default=1.0)
@@ -122,6 +161,111 @@ def _run_dispatch(
     return completed
 
 
+def parse_tenant_allowlist(values: Sequence[str]) -> list[UUID]:
+    """Ham tenant değerlerini UUID listesine çevirir (sıra korunur, tekrarlar atılır).
+
+    Geçersiz değer `ValueError` yükseltir; çağıran taraf kontrollü hataya çevirir.
+    """
+    seen: set[UUID] = set()
+    tenants: list[UUID] = []
+    for raw in values:
+        candidate = raw.strip()
+        if not candidate:
+            continue
+        tenant_id = UUID(candidate)  # geçersizse ValueError
+        if tenant_id not in seen:
+            seen.add(tenant_id)
+            tenants.append(tenant_id)
+    return tenants
+
+
+def resolve_serve_tenants(cli_values: Sequence[str] | None, env_value: str | None) -> list[UUID]:
+    """Servis modu tenant allowlist'i: CLI verilmişse CLI, aksi hâlde environment.
+
+    CLI ve environment BİRLEŞTİRİLMEZ — hangi kaynağın geçerli olduğu belirsiz kalmasın.
+    """
+    if cli_values:
+        return parse_tenant_allowlist(cli_values)
+    raw = (env_value or "").split(",")
+    return parse_tenant_allowlist(raw)
+
+
+def _serve_loop(
+    *,
+    tenant_ids: Sequence[UUID],
+    dispatch: Callable[[UUID], object],
+    stop: _GracefulStop,
+    interval: float,
+    max_cycles: int | None = None,
+) -> int:
+    """Tenant'lar üzerinde ADİL (round-robin) sürekli dispatch döngüsü.
+
+    Adalet: her turda tüm tenant'lar sabit sırayla bir kez işlenir ve tur başlangıcı
+    her turda bir kaydırılır; böylece erken durdurmada (SIGTERM) hep aynı tenant'lar
+    avantajlı olmaz.
+
+    Hata izolasyonu: bir tenant'ın turu hata verirse loglanır ve döngü DİĞER tenant'larla
+    devam eder; tek tenant'ın hatası worker'ı düşürmez ve aynı tur içinde tekrar denenmez.
+
+    `max_cycles` yalnız test/kontrollü çalıştırma içindir; None → durdurulana kadar sürer.
+    """
+    if not tenant_ids:
+        return 0
+
+    total = len(tenant_ids)
+    cycles = 0
+    offset = 0
+    while not stop.stopping and (max_cycles is None or cycles < max_cycles):
+        for index in range(total):
+            if stop.stopping:
+                break
+            tenant_id = tenant_ids[(offset + index) % total]
+            try:
+                dispatch(tenant_id)
+            except Exception as exc:
+                # Tek tenant hatası worker'ı ÖLDÜRMEZ; secret/PII loglanmaz.
+                _log(
+                    "worker.tenant_failed",
+                    tenant_id=tenant_id,
+                    error_type=type(exc).__name__,
+                )
+        cycles += 1
+        offset = (offset + 1) % total
+        if not stop.stopping and (max_cycles is None or cycles < max_cycles):
+            _sleep_interruptibly(max(interval, _MIN_SERVE_INTERVAL_SECONDS), stop)
+    return cycles
+
+
+def _run_serve(
+    settings: Settings,
+    *,
+    tenant_ids: Sequence[UUID],
+    worker_id: str,
+    interval: float,
+    limit: int,
+) -> int:
+    """Servis modu: sinyal kaydı + runtime wiring + adil döngü. Tur sayısını döner."""
+    stop = _GracefulStop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, stop.request)
+
+    wiring = build_runtime(settings)
+    _log("worker.serve_started", tenant_count=len(tenant_ids), worker_id=worker_id)
+    try:
+        cycles = _serve_loop(
+            tenant_ids=tenant_ids,
+            dispatch=lambda tenant_id: wiring.service.run_dispatch_pass(
+                tenant_id=tenant_id, worker_id=worker_id, limit=limit
+            ),
+            stop=stop,
+            interval=interval,
+        )
+    finally:
+        wiring.dispose()
+    _log("worker.serve_stopped", completed_cycles=cycles)
+    return cycles
+
+
 def _sleep_interruptibly(seconds: float, stop: _GracefulStop) -> None:
     deadline = seconds
     step = 0.05
@@ -141,10 +285,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(run_check(settings))  # CLI çıktısı: worker check sonucu
         return 0
 
-    if args.tenant is None:
+    if args.serve:
+        try:
+            tenant_ids = resolve_serve_tenants(args.tenant, os.environ.get(_TENANT_ENV_VAR))
+        except ValueError:
+            parser.error(f"--tenant/{_TENANT_ENV_VAR} değerleri geçerli UUID olmalıdır")
+        if not tenant_ids:
+            # Sessizce boş çalışan bir servis YASAK: yapılandırma eksikse kontrollü hata.
+            parser.error(
+                "--serve için en az bir tenant gerekli: --tenant <uuid> (tekrarlanabilir) "
+                f"veya {_TENANT_ENV_VAR}=<uuid[,uuid...]>"
+            )
+        _run_serve(
+            settings,
+            tenant_ids=tenant_ids,
+            worker_id=args.worker_id,
+            interval=args.interval,
+            limit=args.limit,
+        )
+        return 0
+
+    tenants = args.tenant or []
+    if not tenants:
         parser.error("--run-once/--run için --tenant zorunludur")
+    if len(tenants) > 1:
+        parser.error("--run-once/--run tek --tenant kabul eder (çoklu tenant için --serve)")
     try:
-        tenant_id = UUID(args.tenant)
+        tenant_id = UUID(tenants[0])
     except ValueError:
         parser.error("--tenant geçerli bir UUID olmalıdır")
 
