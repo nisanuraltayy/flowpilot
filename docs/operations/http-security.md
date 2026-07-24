@@ -1,9 +1,9 @@
-# FlowPilot — Backend HTTP Security (Provider-Neutral)
+# FlowPilot — HTTP Security (Provider-Neutral)
 
-> **Kapsam:** FP-OPS-003A. Bu belge yalnız **uygulanmış** sözleşmeleri anlatır:
-> TrustedHost, staging/production docs/OpenAPI kapatma ve temel API response
-> header'ları. CORS'un neden eklenmediği burada; HSTS/proxy/rate-limit/CSP bu
-> dilimde **uygulanmamıştır** (bkz. §6). ADR-010 ve LOCK-006 değiştirilmemiştir.
+> **Kapsam:** FP-OPS-003A (backend) + FP-OPS-003B (frontend). Bu belge yalnız
+> **uygulanmış** sözleşmeleri anlatır: TrustedHost, staging/production docs/OpenAPI
+> kapatma, temel API response header'ları ve Next.js baseline security header'ları. CORS'un neden
+> eklenmediği burada; HSTS/proxy/rate-limit/CSP **uygulanmamıştır** (bkz. §7). ADR-010 ve LOCK-006 değiştirilmemiştir.
 >
 > Tamamlayıcı belgeler: [container-deployment.md](container-deployment.md),
 > [deployment-runbook.md](deployment-runbook.md), [worker-operations.md](worker-operations.md).
@@ -98,12 +98,42 @@ Bu sözleşme contract testiyle korunur (`test_no_cors_headers_on_any_response`)
 - Uygulama `request.client` veya `X-Forwarded-*` temelli hiçbir güvenlik kararı
   vermez; davet linki canonical `FRONTEND_BASE_URL`'den üretilir.
 
-## 6. Bu dilimde bilinçli olarak uygulanmayanlar
+## 6. Next.js baseline security header'ları (FP-OPS-003B)
+
+`apps/web/next.config.ts` içindeki `headers()` catch-all kaynakla (`/(.*)`) —
+sayfalar, route handler'lar ve `_next/static` asset'leri dahil — **tüm**
+yanıtlara şu beş header'ı ekler:
+
+| Header | Değer | Neden |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | Browser MIME sniffing kapalı |
+| `X-Frame-Options` | `DENY` | Ürün kapsamında iframe/embed gereksinimi yok → framing tamamen engelli (clickjacking) |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Cross-origin isteklere tam URL/path sızmaz; same-origin navigasyon bilgisi korunur |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Kullanılmayan güçlü browser yetenekleri kapalı |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Browsing-context izolasyonu; repo'da popup tabanlı OAuth / `window.open` akışı **yoktur** (doğrulandı) |
+
+Kurallar ve doğrulanan davranış:
+
+- Header'lar **duplicate değildir** (contract testi + runtime smoke ile pinli).
+- Route body, redirect ve status davranışı **değişmez**: login/signup/invitation
+  akışları, korumalı-yol → login yönlendirmesi ve open-redirect koruması aynen
+  çalışır (mevcut testler + standalone runtime smoke).
+- `output: "standalone"` korunur; `poweredByHeader` bu dilimde değiştirilmemiştir.
+- **CSP bu dilimde bilinçli olarak yoktur**: App Router hydration inline
+  script'leri nonce tabanlı dinamik CSP ister; statik config CSP'si production
+  build'i kırma riski taşır ve `connect-src` deployment'a göre değişen Supabase
+  URL'sine bağlıdır → ayrı, doğrulanmış CSP dilimi.
+- **HSTS** TLS termination/edge kararına bırakılmıştır (backend ile aynı gerekçe).
+- **CORS** eklenmemiştir: backend'e trafik server-only'dir (§4).
+- İleride popup tabanlı OAuth, embed veya iframe gereksinimi eklenirse
+  `Cross-Origin-Opener-Policy` ve `X-Frame-Options` sözleşmesi **yeniden incelenir**.
+
+## 7. Bu dilimlerde bilinçli olarak uygulanmayanlar
 
 | Konu | Neden / nereye ait |
 |---|---|
 | HSTS | TLS termination edge'dedir; sağlayıcı seçiminde edge katmanında yönetilir |
-| CSP / X-Frame-Options / Permissions-Policy | HTML yüzeyine aittir → Next.js dilimi (FP-OPS-003B) ve ayrı CSP dilimi |
+| CSP | Nonce tabanlı dinamik üretim ister → ayrı, doğrulanmış CSP dilimi |
 | Proxy trust (`--forwarded-allow-ips`) | Sağlayıcı seçimine bağlı; o güne dek IP tabanlı karar verilmez |
 | Rate limiting | Katman/store kararı sağlayıcıya bağlı; ayrı tasarım dilimi |
 | HTTPS redirect | Edge'de; uygulama katmanında healthcheck'i kırar |
