@@ -15,7 +15,7 @@
 |---|---|---|---|
 | API (FastAPI) | `apps/backend` | `apps/backend/Dockerfile` | `uvicorn flowpilot.api.main:app` |
 | Web (Next.js) | `apps/web` | `apps/web/Dockerfile` | `node server.js` (standalone) |
-| Worker | `apps/backend` | `apps/backend/Dockerfile` — **`--target worker`** | `python -m flowpilot.worker --serve` |
+| Worker | `apps/backend` | `apps/backend/Dockerfile` — **`--target worker-runtime`** | `python -m flowpilot.worker --serve` |
 | PostgreSQL | — | Managed servis | Container içinde **tutulmaz** (bkz. §8) |
 
 API ve worker **aynı image ailesindendir**: tek Python distribution'ın iki composition
@@ -35,7 +35,7 @@ docker build -t flowpilot-api:<tag> apps/backend
 ```
 
 ```bash
-docker build -t flowpilot-worker:<tag> --target worker apps/backend
+docker build --target worker-runtime -t flowpilot-worker:<tag> apps/backend
 ```
 
 ```bash
@@ -102,15 +102,19 @@ Her ikisi de `0.0.0.0` dinler ve **non-root** çalışır (API uid `10001`, Web 
 | `DATABASE_URL` | ✅ | Uygulama rolü `flowpilot_app` (BYPASSRLS **yok**) |
 | `WORKER_TENANT_IDS` | ✅ | Virgülle ayrılmış tenant UUID allowlist'i; boşsa süreç başlamaz |
 | `WORKER_POLL_INTERVAL_SECONDS` | — | Sweep'ler arası bekleme; default `1.0`, minimum `0.1` |
-| `WORKER_HEARTBEAT_PATH` | — | Image'da default tanımlı; **boşsa healthcheck sağlıksız döner** |
-| `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | — | Tazelik eşiği; default `60`. Poll interval + en uzun sweep'ten **büyük** seçilir |
+| `WORKER_HEARTBEAT_PATH` | — | Default `/tmp/flowpilot-worker-heartbeat.json`; heartbeat **kapatılamaz**, boş değer reddedilir |
+| `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | — | Tazelik eşiği; default `60`, minimum `1.0`. Poll interval + en uzun sweep'ten **büyük** seçilir |
 
-Worker'ın liveness'i HTTP ile ölçülemez (port yok). Bunun yerine süreç ayağa kalkarken ve
-**her sweep sonunda** heartbeat dosyasına UTC damga yazar; container healthcheck'i
-`python -m flowpilot.worker --check-heartbeat` ile bu damganın **yaşına** bakar — worker
-loop başlatmaz ve **database'e dokunmaz**. Heartbeat dosyası yalnız zaman damgası içerir
-(secret/tenant/PII yok) ve kalıcı volume gerektirmez. Heartbeat yazımı başarısız olursa
-loglanır ama **dispatch durmaz**.
+Worker'ın liveness'i HTTP ile ölçülemez (port yok). Bunun yerine süreç yaşam döngüsünü
+heartbeat **JSON belgesine** yazar: startup'ta `starting`, her tamamlanan sweep'te tam
+başarıysa `healthy` / en az bir tenant hatalıysa `degraded`, stop'ta `stopping` → `stopped`.
+Container healthcheck'i `python -m flowpilot.worker --check-heartbeat` yalnız
+`status=healthy` VE `last_full_success_at` eşik içinde tazeyse 0 döner — worker loop
+başlatmaz ve **database'e dokunmaz**. Sürekli başarısız bir worker dosyayı taze yazsa bile
+healthy sayılmaz. Belge yalnız status/pid/UTC damgaları/tenant SAYISI/hata sayacı içerir
+(tenant UUID, DSN, secret, PII yok) ve kalıcı volume gerektirmez. Startup heartbeat'i
+yazılamazsa worker fail-fast eder; sonraki yazım hataları loglanır ama **dispatch durmaz**
+(dosya bayatlar, healthcheck düşer).
 
 ### Web (runtime)
 

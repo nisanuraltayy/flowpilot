@@ -112,8 +112,8 @@ def test_backend_default_build_target_is_api_not_worker() -> None:
     order = _stage_order(_BACKEND / "Dockerfile")
 
     assert order[-1] == "api", f"son stage 'api' olmali, bulunan: {order[-1]}"
-    assert "worker" in order
-    assert order.index("worker") < order.index("api")
+    assert "worker-runtime" in order
+    assert order.index("worker-runtime") < order.index("api")
 
 
 def test_backend_api_stage_does_not_run_worker() -> None:
@@ -124,20 +124,30 @@ def test_backend_api_stage_does_not_run_worker() -> None:
 
 
 def test_backend_worker_stage_runs_service_mode_without_http() -> None:
-    worker_stage = _stages(_BACKEND / "Dockerfile")["worker"]
+    worker_stage = _stages(_BACKEND / "Dockerfile")["worker-runtime"]
 
     # Worker AYRI bir composition root'tur; ASGI uygulamasini CALISTIRMAZ.
     assert "flowpilot.api.main:app" not in worker_stage
     assert "uvicorn" not in worker_stage
     # Servis modu + heartbeat tabanli healthcheck (HTTP portu YOK).
-    assert "--serve" in worker_stage
-    assert "--check-heartbeat" in worker_stage
+    assert '"--serve"' in worker_stage
+    assert '"--check-heartbeat"' in worker_stage
     assert "HEALTHCHECK" in worker_stage
     assert "EXPOSE" not in worker_stage
+    # API liveness healthcheck'i worker'da KULLANILMAZ.
+    assert "/health/live" not in worker_stage
     # Tenant listesi image'a GOMULMEZ (environment'tan gelir).
     assert "WORKER_TENANT_IDS=" not in worker_stage
     # Startup'ta migration YOK.
     assert "upgrade head" not in worker_stage
+
+
+def test_backend_worker_stage_declares_heartbeat_defaults() -> None:
+    worker_stage = _stages(_BACKEND / "Dockerfile")["worker-runtime"]
+
+    # Kod default'u ile AYNI yol; secret degildir.
+    assert "WORKER_HEARTBEAT_PATH=/tmp/flowpilot-worker-heartbeat.json" in worker_stage
+    assert "WORKER_HEARTBEAT_MAX_AGE_SECONDS=60" in worker_stage
 
 
 def test_web_dockerfile_deployment_contract() -> None:

@@ -1,8 +1,8 @@
 # FlowPilot Backend — provider-neutral production image (API + worker).
 #
 # Build context: apps/backend  (distribution kendi kendine yeterlidir — ADR-009)
-#   docker build -t flowpilot-api:local apps/backend                    # API (default)
-#   docker build -t flowpilot-worker:local --target worker apps/backend # worker
+#   docker build -t flowpilot-api:local apps/backend                            # API (default)
+#   docker build --target worker-runtime -t flowpilot-worker:local apps/backend # worker
 #
 # API ve worker AYNI distribution'ın İKİ COMPOSITION ROOT'udur (ADR-009): ortak
 # `runtime` katmanını paylaşırlar, AYRI process/servis olarak çalıştırılırlar.
@@ -71,24 +71,26 @@ COPY --chown=10001:10001 migrations ./migrations
 USER 10001:10001
 
 # ---------------------------------------------------------------------------
-# Stage 3 — worker: outbox/timer dispatch servisi (AYRI process, --target worker)
+# Stage 3 — worker-runtime: outbox/timer dispatch servisi
+#                           (AYRI process, --target worker-runtime)
 #
-# HTTP port DİNLEMEZ; bu yüzden liveness'i HTTP ile ölçülemez. Bunun yerine süreç
-# ayağa kalkarken ve HER sweep sonunda heartbeat dosyasına UTC damga yazar;
-# healthcheck bu damganın tazeliğine bakar (database'e DOKUNMAZ).
+# HTTP port DİNLEMEZ; liveness HTTP ile ölçülemez (API'nin /health/live healthcheck'i
+# burada KULLANILMAZ). Bunun yerine süreç yaşam döngüsünü heartbeat JSON belgesine
+# yazar (starting → healthy/degraded → stopping → stopped); healthcheck bu belgeyi
+# ve `last_full_success_at` tazeliğini doğrular (database'e DOKUNMAZ).
 #
 # Tenant allowlist'i WORKER_TENANT_IDS ile verilir (worker cross-tenant KEŞİF
 # YAPMAZ). Boşsa süreç kontrollü hata ile çıkar; sessizce boş çalışmaz.
 # ---------------------------------------------------------------------------
-FROM runtime AS worker
+FROM runtime AS worker-runtime
 
 # Heartbeat dosyası: container'a özgü, non-root kullanıcının yazabildiği geçici yol.
-# Kalıcı volume GEREKTİRMEZ — süreçle birlikte doğar ve ölür.
-ENV WORKER_HEARTBEAT_PATH=/tmp/flowpilot/worker-heartbeat \
+# Kod default'u ile AYNI değerdir; kalıcı volume GEREKTİRMEZ.
+ENV WORKER_HEARTBEAT_PATH=/tmp/flowpilot-worker-heartbeat.json \
     WORKER_HEARTBEAT_MAX_AGE_SECONDS=60
 
-# Heartbeat tazelik kontrolü: worker loop BAŞLATMAZ, database bağlantısı KURMAZ.
-# start-period süreci ilk damgayı yazana kadar hoşgörür; retries bounded'dır.
+# Heartbeat doğrulaması: worker loop BAŞLATMAZ, database bağlantısı KURMAZ.
+# start-period süreci ilk TAM BAŞARILI sweep'e kadar hoşgörür; retries bounded'dır.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ["python", "-m", "flowpilot.worker", "--check-heartbeat"]
 
