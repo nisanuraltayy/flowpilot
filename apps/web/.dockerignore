@@ -1,0 +1,35 @@
+# FlowPilot Web — build context filtresi.
+#
+# AMAÇ: secret, local env, build/test artıkları image'a GİRMEZ.
+# Build context: apps/web
+#
+# NOT: package.json, package-lock.json, src/, public/, next.config.ts, tsconfig.json,
+# postcss/eslint config'leri GEREKLİDİR — bunlar bilinçli olarak dışlanmaz.
+
+# --- Secret / environment (ASLA image'a girmez) ---
+.env
+.env.*
+*.env
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Bağımlılık ve build artıkları (image içinde yeniden üretilir) ---
+node_modules/
+.next/
+out/
+dist/
+
+# --- Test / coverage ---
+coverage/
+.vitest/
+*.tsbuildinfo
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

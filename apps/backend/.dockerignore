@@ -1,0 +1,46 @@
+# FlowPilot Backend — build context filtresi.
+#
+# AMAÇ: secret, local env, test/cache artıkları ve gereksiz dosyalar image'a GİRMEZ.
+# Build context: apps/backend
+#
+# NOT: pyproject.toml, README.md, src/, alembic.ini ve migrations/ GEREKLİDİR —
+# bunlar bilinçli olarak dışlanmaz.
+
+# --- Secret / environment (ASLA image'a girmez) ---
+.env
+.env.*
+*.env
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+
+# --- Python cache / build artıkları ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# --- Test / kalite cache'leri ---
+tests/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

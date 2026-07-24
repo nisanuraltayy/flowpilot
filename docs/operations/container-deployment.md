@@ -1,0 +1,144 @@
+# FlowPilot — Container Deployment (Provider-Neutral)
+
+> **Kapsam:** FP-OPS-001. Bu belge FlowPilot'ın **sağlayıcıdan bağımsız** biçimde nasıl
+> paketlendiğini ve çalıştırıldığını anlatır. **Hosting sağlayıcısı seçmez** ve
+> [ADR-010](../adr/ADR-010-initial-hosting-and-data-region.md) / LOCK-006 kararlarını
+> **değiştirmez**. Sağlayıcıya özel manifest (render.yaml, vercel.json, fly.toml …)
+> bilinçli olarak **yoktur**.
+>
+> Tamamlayıcı belge: [deployment-runbook.md](deployment-runbook.md) (ortam envanteri,
+> rollback, incident). Bu belge yalnız **container paketleme ve çalıştırma** katmanıdır.
+
+## 1. Bileşenler ve image'lar
+
+| Bileşen | Build context | Image | Process |
+|---|---|---|---|
+| API (FastAPI) | `apps/backend` | `apps/backend/Dockerfile` | `uvicorn flowpilot.api.main:app` |
+| Web (Next.js) | `apps/web` | `apps/web/Dockerfile` | `node server.js` (standalone) |
+| Worker | — | **YOK (bilinçli)** | Worker sürekli servis modu **FP-OPS-002** kapsamındadır |
+| PostgreSQL | — | Managed servis | Container içinde **tutulmaz** (bkz. §8) |
+
+Her iki context de **kendi kendine yeterlidir**: `apps/backend` tek Python distribution'dır
+(ADR-009), `apps/web` kendi `package.json` + `package-lock.json`'ına sahiptir. Monorepo
+kökünü build context yapmaya gerek yoktur.
+
+## 2. Image build
+
+```bash
+docker build -t flowpilot-api:<tag> apps/backend
+```
+
+```bash
+docker build -t flowpilot-web:<tag> \
+  --build-arg NEXT_PUBLIC_SUPABASE_URL=<public-supabase-url> \
+  --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key> \
+  --build-arg NEXT_PUBLIC_APP_URL=<public-app-url> \
+  apps/web
+```
+
+> **Kritik:** `NEXT_PUBLIC_*` değerleri Next.js tarafından **build sırasında koda gömülür**.
+> Runtime'da `-e` ile verilmeleri **etkisizdir**. Değiştirmek için **yeniden build** gerekir.
+> Bu değerler secret değildir (tarayıcıya gider); yine de gerçek değerler repository'ye yazılmaz.
+
+## 3. Container run
+
+```bash
+docker run -d --name flowpilot-api -p 8000:8000 \
+  -e APP_ENVIRONMENT=production \
+  -e APP_DEBUG=false \
+  -e DATABASE_URL=<app-role-connection-string> \
+  -e SUPABASE_URL=<supabase-project-url> \
+  flowpilot-api:<tag>
+```
+
+```bash
+docker run -d --name flowpilot-web -p 3000:3000 \
+  -e FLOWPILOT_API_BASE_URL=<api-base-url> \
+  flowpilot-web:<tag>
+```
+
+Portlar environment'tan gelir: API `APP_PORT` (default 8000), Web `PORT` (default 3000).
+Her ikisi de `0.0.0.0` dinler ve **non-root** çalışır (API uid `10001`, Web `node`/uid `1000`).
+
+## 4. Runtime environment değişkenleri (yalnız ADLAR)
+
+### API (runtime)
+
+| Değişken | Zorunlu | Not |
+|---|---|---|
+| `APP_ENVIRONMENT` | ✅ | `production` / `staging` → strict doğrulama açılır |
+| `DATABASE_URL` | ✅ | Uygulama rolü `flowpilot_app` (BYPASSRLS **yok**) |
+| `SUPABASE_URL` | ✅ | JWKS/issuer bundan türetilir |
+| `APP_DEBUG` | — | staging/production'da `true` **reddedilir** (§6) |
+| `APP_PORT`, `LOG_LEVEL`, `FRONTEND_BASE_URL` | — | Davet linki için `FRONTEND_BASE_URL` önerilir |
+
+### Web (runtime)
+
+| Değişken | Zorunlu | Not |
+|---|---|---|
+| `FLOWPILOT_API_BASE_URL` | ✅ | **SERVER-ONLY** — `NEXT_PUBLIC_` öneki yoktur, browser bundle'a girmez |
+| `PORT`, `HOSTNAME` | — | Default `3000` / `0.0.0.0` |
+
+### Web (build-time — §2)
+
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_APP_URL`.
+
+> Service role key ve JWT secret **hiçbir katmanda yoktur** (ADR-005). Image'lara `.env`,
+> `.pem`, `.key` **kopyalanmaz** (`.dockerignore`).
+
+## 5. Migration release step
+
+Migration **uygulama startup'ında ÇALIŞTIRILMAZ**. Ayrı, tek seferlik bir release adımıdır ve
+API/Web başlatılmadan **önce** koşar. Başarısız olursa **deployment durur** (exit code > 0).
+
+```bash
+python scripts/run_production_migrations.py
+```
+
+- **Çalışma dizini:** repo kökü (veya `--alembic-ini` ile yol verilir)
+- **Alembic config:** `apps/backend/alembic.ini` (script_location: `migrations/`)
+- **Komut karşılığı:** `alembic -c apps/backend/alembic.ini upgrade head`
+- **Bağlantı:** `MIGRATION_DATABASE_URL` → migrator rolü `flowpilot_migrator` (DDL yetkili,
+  uygulama rolünden **ayrı**)
+- `--check-only` bekleyen migration'ı raporlar, **upgrade çalıştırmaz**
+- Script secret **yazdırmaz**, database **sıfırlamaz**, seed **çalıştırmaz**, downgrade **yapmaz**
+
+Aynı API image'ı bu adım için de kullanılabilir (`alembic.ini` + `migrations/` image içindedir);
+bu durumda container'a yalnız `MIGRATION_DATABASE_URL` verilir.
+
+## 6. Production yapılandırma fail-fast
+
+- **API:** `staging`/`production`'da `SUPABASE_URL` veya `DATABASE_URL` eksikse **başlamaz**;
+  `APP_DEBUG=true` **reddedilir**; `production`'da `localhost`/`127.0.0.1` adresli
+  `DATABASE_URL`/`SUPABASE_URL` **reddedilir**. Hata mesajları yalnız **değişken adı** içerir.
+- **Web:** production runtime'da `FLOWPILOT_API_BASE_URL` / `NEXT_PUBLIC_APP_URL` eksikse
+  localhost'a **sessizce düşmez**, anlaşılır hata verir; Supabase public değişkenleri eksikse
+  fail-fast eder (çözüm: §2 build argümanlarıyla yeniden build).
+
+## 7. API ↔ Frontend bağlantısı
+
+Tarayıcı FastAPI'yi **doğrudan çağırmaz**. Next.js **server** tarafı `FLOWPILOT_API_BASE_URL`
+ile FastAPI'ye Bearer istek yapar (`apps/web/src/lib/api/http.ts` → `import "server-only"`).
+Bu nedenle API'nin public internete açılması **zorunlu değildir**; sağlayıcı private
+networking sunuyorsa API private tutulabilir.
+
+## 8. Sağlayıcı kurulumunda yapılacaklar (bu dilimin dışında)
+
+- **Supabase redirect/allow-list**: Site URL + `/auth/callback` (staging + production) sağlayıcı
+  ve Supabase panelinde yapılandırılır — repository'de saklanmaz.
+- **Persistent database**: PostgreSQL **container içinde tutulmaz**; managed servis kullanılır
+  (yedek/PITR sağlayıcı tarafında yapılandırılır).
+- **Object storage**: Mevcut pilot kapsamı için **zorunlu değildir** — dosya eki özelliği ve
+  `FileStoragePort` adapter'ı yoktur. `infra/containers/compose.yaml` içindeki MinIO yalnız
+  **local development** içindir.
+- **TLS / domain / reverse proxy**: sağlayıcı katmanında.
+
+## 9. Bu dilimde bilinçli olarak YOK
+
+| Konu | Nereye ait |
+|---|---|
+| Worker container/servis modu | **FP-OPS-002** (worker şu an `--tenant` + sınırlı `--max-passes` ister) |
+| Gerçek readiness (`/health/ready` bağımlılık kontrolü) | **FP-OPS-002** — bu yüzden container healthcheck'i yalnız `/health/live` kullanır |
+| Güvenlik header'ları, CORS, rate limiting | **FP-OPS-003** |
+| Hata izleme, e-posta, metrik | FP-OPS-004 ve sonrası |
+| Sağlayıcı seçimi / manifest | ADR-010 kapsamı — **değiştirilmedi** |
