@@ -182,7 +182,39 @@ alındı (build-time HTML nonce'suz kalırdı). Framework'ün `_not-found` /
 FP-OPS-004B doğrulamasının konusudur. Baseline beş header `next.config.ts`'te
 değişmeden durur; CSP **yalnız proxy katmanından** gelir. Yeni environment
 değişkeni yoktur. Kapsamlı runtime/Docker/browser doğrulaması FP-OPS-004B'de
-tamamlanacaktır.
+tamamlanmıştır (aşağıda).
+
+**Runtime doğrulama sonuçları (FP-OPS-004B/004C):**
+
+- **Production standalone:** `/login`, `/signup`, `/auth/check-email`,
+  `/auth/error` ve geçersiz-token davet sayfası 200 + tek CSP header;
+  header nonce'u HTML'deki TÜM script etiketleriyle birebir eşleşir
+  (15–23 tag/sayfa), nonce'suz inline script **0**, her istekte nonce farklı.
+  Korumalı yollar (`/dashboard`, `/onboarding/organization`) 307 → `/login`
+  zinciriyle korunur. Baseline beş header tüm yanıtlarda; HSTS/ACAO yok.
+- **404:** custom not-found `connection()` ile **request-time render** edilir
+  (FP-OPS-004C; `_not-found` artık prerender edilmez) — 404 yanıtı da isteğin
+  nonce'uyla üretilir, içerik ve linkler çalışır.
+- **Browser console (headless Chrome):** login/signup/404/dashboard-redirect/
+  davet sayfalarında **CSP violation 0, hydration hatası 0**; CSS/font/chunk
+  istekleri 200.
+- **Development:** dev politikası sözleşmeyle birebir (`unsafe-eval` yalnız
+  script-src, `unsafe-inline` yalnız style-src, `ws:` yalnız connect-src);
+  login/signup render olur, browser console'da violation yok (HMR websocket'i
+  engellenmez — engellenseydi `Refused to connect` ihlali düşerdi).
+- **Docker (web image):** uid 1000, CMD production standalone server;
+  login/signup/404 nonce eşleşmesi ve istek-başına farklı nonce doğrulandı;
+  404 violation'sız; static asset'ler 200; image'da `.env`/`.key`/`.pem` yok.
+- **Test kararlılığı:** frontend suite 5 ardışık koşumda 345/345 + exit 0 +
+  unhandled error'suz; release_verify 14/14.
+- **Residual (`_global-error`):** framework `_global-error` artefaktı hâlâ
+  prerender edilir ve güvenli/deterministik tetikleme yolu olmadığından runtime
+  nonce davranışı doğrudan doğrulanamadı; normal route, redirect ve 404
+  davranışları doğrulandığı için bu **merge blocker değildir**. İleride custom
+  `global-error` UX'i eklenirse nonce sözleşmesi o story'de ayrıca test edilir.
+
+Doğrulama sırasında yeni environment değişkeni, dependency veya reporting
+collector eklenmemiştir.
 
 ## 7. Deferred controls and deployment-dependent decisions (FP-OPS-003C)
 
