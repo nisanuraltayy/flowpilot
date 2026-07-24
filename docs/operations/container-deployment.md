@@ -6,8 +6,10 @@
 > **değiştirmez**. Sağlayıcıya özel manifest (render.yaml, vercel.json, fly.toml …)
 > bilinçli olarak **yoktur**.
 >
-> Tamamlayıcı belge: [deployment-runbook.md](deployment-runbook.md) (ortam envanteri,
-> rollback, incident). Bu belge yalnız **container paketleme ve çalıştırma** katmanıdır.
+> Tamamlayıcı belgeler: [deployment-runbook.md](deployment-runbook.md) (ortam envanteri,
+> rollback, incident) ve [worker-operations.md](worker-operations.md) (worker servis modu,
+> heartbeat, healthcheck ve operasyon prosedürleri). Bu belge yalnız **container paketleme
+> ve çalıştırma** katmanıdır.
 
 ## 1. Bileşenler ve image'lar
 
@@ -114,7 +116,8 @@ başlatmaz ve **database'e dokunmaz**. Sürekli başarısız bir worker dosyayı
 healthy sayılmaz. Belge yalnız status/pid/UTC damgaları/tenant SAYISI/hata sayacı içerir
 (tenant UUID, DSN, secret, PII yok) ve kalıcı volume gerektirmez. Startup heartbeat'i
 yazılamazsa worker fail-fast eder; sonraki yazım hataları loglanır ama **dispatch durmaz**
-(dosya bayatlar, healthcheck düşer).
+(dosya bayatlar, healthcheck düşer). Ayrıntılı yaşam döngüsü, checker kuralları ve operasyon
+prosedürleri: [worker-operations.md](worker-operations.md).
 
 ### Web (runtime)
 

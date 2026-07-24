@@ -64,7 +64,9 @@ anahtarı bu uygulamalarda kullanılmaz.
 **Backend (container image önerilir; provider-neutral):**
 1. Python 3.12/3.13 tabanı.
 2. `pip install -e "apps/backend"` (runtime bağımlılıkları; dev extras production image'a girmez).
-3. Entrypoint(ler): API → `uvicorn flowpilot.api.main:app`; worker → `python -m flowpilot.worker --run`.
+3. Entrypoint(ler): API → `uvicorn flowpilot.api.main:app`; worker →
+   `python -m flowpilot.worker --serve` (tenant allowlist zorunlu; bkz.
+   [worker-operations.md](worker-operations.md)).
 
 **Frontend:**
 1. Node 20 LTS.
@@ -94,9 +96,11 @@ downgrade runtime rollback aracı değildir (aşağıya bakın).
 | Endpoint | Anlam |
 |---|---|
 | `GET /health/live` | Process ayakta (liveness) — 200 `{"status":"ok"}` |
-| `GET /health/ready` | Bağımlılıklar hazır (readiness) — 200 `{"status":"ready",...}` |
+| `GET /health/ready` | Database'e gerçek `SELECT 1` (paylaşılan session factory) — hazırsa 200, değilse 503; hata detayı/DSN sızdırmaz |
 
-Load balancer/orchestrator readiness'i trafik açmadan önce beklemeli.
+Load balancer/orchestrator readiness'i trafik açmadan önce beklemeli. Worker'ın sağlığı
+HTTP ile değil heartbeat healthcheck'i ile izlenir: bkz.
+[worker-operations.md](worker-operations.md).
 
 ## 7. İlk tenant / bootstrap
 
