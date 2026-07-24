@@ -15,13 +15,21 @@ Modlar:
         busy loop YASAK; kontrollü bir üst sınır zorunludur).
 
     python -m flowpilot.worker --serve --tenant <uuid> [--tenant <uuid> ...]
-        PRODUCTION servis modu: açık tenant allowlist'i üzerinde ADİL (round-robin)
-        sürekli dispatch. Tenant'lar `--tenant` (tekrarlanabilir) veya
-        `WORKER_TENANT_IDS` (virgülle ayrılmış) ile verilir; CLI verilmişse CLI
-        geçerlidir. Hiç tenant yoksa kontrollü hata verir (sessizce boş çalışmaz).
-        Bir tenant'ın turu hata verirse loglanır ve döngü diğer tenant'larla DEVAM
-        eder (tenant hata izolasyonu). Turlar arası `--interval` beklenir (busy-spin
-        yok) ve SIGTERM/SIGINT'te graceful durur.
+        PRODUCTION servis modu: açık tenant allowlist'i üzerinde sürekli dispatch.
+        Tenant'lar `--tenant` (tekrarlanabilir) veya `WORKER_TENANT_IDS` (virgülle
+        ayrılmış) ile verilir; CLI verilmişse CLI geçerlidir. Hiç tenant yoksa
+        kontrollü hata verir (sessizce boş çalışmaz).
+
+        Sıra STABİL ve deterministiktir: allowlist'in ilk görülme sırası korunur ve
+        HER sweep aynı sırayı kullanır (rotasyon YOKTUR). Adalet, her tenant'ın sweep
+        başına tam bir pass ve aynı `limit` ile işlenmesinden gelir.
+
+        Bir tenant'ın pass'i hata verirse loglanır, döngü diğer tenant'larla DEVAM
+        eder ve o tenant SONRAKİ sweep'te aynı konumunda yeniden denenir.
+
+        Sweep sonunda `--interval` beklenir; verilmezse `WORKER_POLL_INTERVAL_SECONDS`,
+        o da yoksa güvenli default kullanılır (minimum 0.1 sn; busy-spin yok).
+        SIGTERM/SIGINT'te mevcut tenant pass'inden sonra yeni tenant başlatılmaz.
 
         Worker cross-tenant KEŞİF YAPMAZ: `flowpilot_app` NOBYPASSRLS'tir ve her
         tenant kendi RLS context'inde işlenir.
@@ -36,6 +44,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import signal
 import sys
@@ -55,8 +64,12 @@ _LOGGER = logging.getLogger("flowpilot.worker")
 # YOKTUR. Bu yüzden servis modunda işlenecek tenant'lar AÇIKÇA yapılandırılır.
 _TENANT_ENV_VAR = "WORKER_TENANT_IDS"
 
-# Servis modunda turlar arası en küçük bekleme: busy-spin YASAK.
-_MIN_SERVE_INTERVAL_SECONDS = 0.05
+# Servis modu poll interval sözleşmesi. Secret DEĞİLDİR.
+_INTERVAL_ENV_VAR = "WORKER_POLL_INTERVAL_SECONDS"
+# Turlar arası en küçük bekleme: busy-spin YASAK.
+_MIN_POLL_INTERVAL_SECONDS = 0.1
+# CLI ve environment yoksa kullanılan mevcut güvenli default (davranış değişmedi).
+_DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -84,9 +97,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--serve",
         action="store_true",
         help=(
-            "Production servis modu: açık tenant allowlist'i üzerinde adil (round-robin) "
+            "Production servis modu: açık tenant allowlist'i üzerinde STABİL sırayla "
             f"sürekli dispatch. Tenant'lar --tenant (tekrarlanabilir) veya {_TENANT_ENV_VAR} "
-            "ile verilir. SIGTERM/SIGINT'te graceful durur."
+            "ile verilir. Her sweep aynı sırayı kullanır; SIGTERM/SIGINT'te graceful durur."
         ),
     )
     parser.add_argument(
@@ -101,7 +114,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--worker-id", type=str, default="workflow-runtime-worker")
     parser.add_argument("--max-passes", type=int, default=1)
-    parser.add_argument("--interval", type=float, default=1.0)
+    # default=None: CLI'da AÇIKÇA verilip verilmediği ayırt edilebilsin (environment
+    # fallback'i yalnız verilmediğinde devreye girer). Çözülmüş default ayrı helper'da.
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=None,
+        help=(
+            f"Turlar arası bekleme (saniye). Verilmezse --serve icin {_INTERVAL_ENV_VAR}, "
+            f"o da yoksa {_DEFAULT_POLL_INTERVAL_SECONDS} kullanılır."
+        ),
+    )
     parser.add_argument("--limit", type=int, default=20)
     return parser
 
@@ -179,6 +202,46 @@ def parse_tenant_allowlist(values: Sequence[str]) -> list[UUID]:
     return tenants
 
 
+class IntervalError(ValueError):
+    """Geçersiz poll interval. Mesaj yalnız değişken adı + hata KATEGORİSİ taşır."""
+
+
+def _validate_interval(value: float) -> float:
+    """Sonlu ve minimum eşiğin üstünde bir interval döndürür.
+
+    0, negatif, minimum altı, NaN ve infinity REDDEDİLİR. Hata mesajı geçersiz
+    DEĞERİ tekrar etmez; yalnız değişken adı ve kategori bildirilir.
+    """
+    if not math.isfinite(value):
+        raise IntervalError(f"{_INTERVAL_ENV_VAR} sonlu bir sayı olmalıdır")
+    if value < _MIN_POLL_INTERVAL_SECONDS:
+        raise IntervalError(
+            f"{_INTERVAL_ENV_VAR} en az {_MIN_POLL_INTERVAL_SECONDS} saniye olmalıdır"
+        )
+    return value
+
+
+def resolve_poll_interval(cli_value: float | None, env_value: str | None) -> float:
+    """Servis modu poll interval'i: CLI > environment > güvenli default.
+
+    CLI'da `--interval` AÇIKÇA verilmişse o kullanılır (argparse default'u `None`
+    olduğu için "verildi mi" ayırt edilebilir). Verilmemişse `WORKER_POLL_INTERVAL_SECONDS`
+    okunur. İkisi de yoksa mevcut güvenli default kullanılır. Tüm yollar doğrulanır.
+    """
+    if cli_value is not None:
+        return _validate_interval(cli_value)
+
+    raw = (env_value or "").strip()
+    if not raw:
+        return _DEFAULT_POLL_INTERVAL_SECONDS
+
+    try:
+        parsed = float(raw)
+    except ValueError as exc:
+        raise IntervalError(f"{_INTERVAL_ENV_VAR} sayısal bir değer olmalıdır") from exc
+    return _validate_interval(parsed)
+
+
 def resolve_serve_tenants(cli_values: Sequence[str] | None, env_value: str | None) -> list[UUID]:
     """Servis modu tenant allowlist'i: CLI verilmişse CLI, aksi hâlde environment.
 
@@ -198,28 +261,30 @@ def _serve_loop(
     interval: float,
     max_cycles: int | None = None,
 ) -> int:
-    """Tenant'lar üzerinde ADİL (round-robin) sürekli dispatch döngüsü.
+    """Tenant'lar üzerinde STABİL sıralı sürekli dispatch döngüsü.
 
-    Adalet: her turda tüm tenant'lar sabit sırayla bir kez işlenir ve tur başlangıcı
-    her turda bir kaydırılır; böylece erken durdurmada (SIGTERM) hep aynı tenant'lar
-    avantajlı olmaz.
+    Sıra: allowlist'in İLK GÖRÜLME sırası korunur ve HER sweep aynı sırayı kullanır
+    (rotasyon YOKTUR). Sweep sırasında tenant listesi değişmez.
 
-    Hata izolasyonu: bir tenant'ın turu hata verirse loglanır ve döngü DİĞER tenant'larla
-    devam eder; tek tenant'ın hatası worker'ı düşürmez ve aynı tur içinde tekrar denenmez.
+    Adalet: her tenant sweep başına TAM BİR pass alır ve hepsi aynı `limit` ile
+    işlenir; yoğun bir tenant diğerini aç bırakamaz.
+
+    Hata izolasyonu: bir tenant'ın pass'i hata verirse loglanır ve döngü DİĞER
+    tenant'larla devam eder; tek tenant'ın hatası worker'ı düşürmez, aynı sweep içinde
+    tekrar denenmez ve tenant SONRAKİ sweep'te aynı konumunda yeniden denenir.
 
     `max_cycles` yalnız test/kontrollü çalıştırma içindir; None → durdurulana kadar sürer.
     """
     if not tenant_ids:
         return 0
 
-    total = len(tenant_ids)
+    # Sweep sırasında listenin değişmemesi için tek seferlik anlık görüntü.
+    sweep_order = tuple(tenant_ids)
     cycles = 0
-    offset = 0
     while not stop.stopping and (max_cycles is None or cycles < max_cycles):
-        for index in range(total):
+        for tenant_id in sweep_order:
             if stop.stopping:
                 break
-            tenant_id = tenant_ids[(offset + index) % total]
             try:
                 dispatch(tenant_id)
             except Exception as exc:
@@ -230,9 +295,8 @@ def _serve_loop(
                     error_type=type(exc).__name__,
                 )
         cycles += 1
-        offset = (offset + 1) % total
         if not stop.stopping and (max_cycles is None or cycles < max_cycles):
-            _sleep_interruptibly(max(interval, _MIN_SERVE_INTERVAL_SECONDS), stop)
+            _sleep_interruptibly(interval, stop)
     return cycles
 
 
@@ -296,11 +360,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "--serve için en az bir tenant gerekli: --tenant <uuid> (tekrarlanabilir) "
                 f"veya {_TENANT_ENV_VAR}=<uuid[,uuid...]>"
             )
+        try:
+            interval = resolve_poll_interval(args.interval, os.environ.get(_INTERVAL_ENV_VAR))
+        except IntervalError as exc:
+            parser.error(str(exc))
         _run_serve(
             settings,
             tenant_ids=tenant_ids,
             worker_id=args.worker_id,
-            interval=args.interval,
+            interval=interval,
             limit=args.limit,
         )
         return 0
@@ -329,12 +397,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     # --run: kontrollü döngü; sonsuz busy loop YASAK.
     if args.max_passes < 1:
         parser.error("--run için --max-passes >= 1 olmalıdır (sonsuz loop yasak)")
+    # --run interval davranışı DEĞİŞMEDİ: CLI değeri, verilmemişse mevcut default.
+    # Environment fallback'i bilinçli olarak YALNIZ --serve içindir.
     _run_dispatch(
         settings,
         tenant_id=tenant_id,
         worker_id=args.worker_id,
         passes=args.max_passes,
-        interval=args.interval,
+        interval=(args.interval if args.interval is not None else _DEFAULT_POLL_INTERVAL_SECONDS),
         limit=args.limit,
     )
     return 0

@@ -13,11 +13,14 @@ from uuid import UUID
 import pytest
 
 from flowpilot.worker.__main__ import (
+    _DEFAULT_POLL_INTERVAL_SECONDS,
     CHECK_OK_MESSAGE,
+    IntervalError,
     _GracefulStop,
     _serve_loop,
     main,
     parse_tenant_allowlist,
+    resolve_poll_interval,
     resolve_serve_tenants,
 )
 
@@ -183,19 +186,139 @@ def test_serve_loop_processes_every_tenant_each_cycle() -> None:
     assert {seen.count(UUID(t)) for t in (_T1, _T2, _T3)} == {2}
 
 
-def test_serve_loop_rotates_start_for_fairness() -> None:
+def test_serve_loop_uses_stable_order_every_sweep() -> None:
+    """Sıra STABİL: her sweep ilk görülme sırasını kullanır (rotasyon YOK)."""
     seen: list[UUID] = []
+    order = [UUID(_T1), UUID(_T2), UUID(_T3)]
+
     _serve_loop(
-        tenant_ids=[UUID(_T1), UUID(_T2), UUID(_T3)],
+        tenant_ids=order,
+        dispatch=seen.append,
+        stop=_GracefulStop(),
+        interval=0.0,
+        max_cycles=3,
+    )
+
+    assert seen[0:3] == order  # sweep 1: A, B, C
+    assert seen[3:6] == order  # sweep 2: A, B, C
+    assert seen[6:9] == order  # sweep 3: A, B, C
+
+
+def test_serve_loop_order_follows_first_seen_after_dedupe() -> None:
+    """Duplicate'ler deterministik biçimde kaldırılır ve sweep sırası bunu izler."""
+    tenants = parse_tenant_allowlist([_T3, _T1, _T3, _T2, _T1])
+    seen: list[UUID] = []
+
+    _serve_loop(
+        tenant_ids=tenants,
         dispatch=seen.append,
         stop=_GracefulStop(),
         interval=0.0,
         max_cycles=2,
     )
 
-    # İkinci tur farklı tenant ile başlar → erken durdurmada hep aynı tenant öncelikli olmaz.
-    assert seen[0] == UUID(_T1)
-    assert seen[3] == UUID(_T2)
+    assert tenants == [UUID(_T3), UUID(_T1), UUID(_T2)]
+    assert seen == tenants * 2
+
+
+def test_serve_loop_keeps_stable_order_despite_failing_tenant() -> None:
+    """Hatalı tenant sırayı bozmaz ve SONRAKİ sweep'te aynı konumda yeniden denenir."""
+    attempted: list[UUID] = []
+    failing = UUID(_T2)
+
+    def dispatch(tenant_id: UUID) -> None:
+        attempted.append(tenant_id)
+        if tenant_id == failing:
+            raise RuntimeError("tenant dispatch exploded")
+
+    _serve_loop(
+        tenant_ids=[UUID(_T1), failing, UUID(_T3)],
+        dispatch=dispatch,
+        stop=_GracefulStop(),
+        interval=0.0,
+        max_cycles=2,
+    )
+
+    expected = [UUID(_T1), failing, UUID(_T3)]
+    assert attempted[0:3] == expected  # hataya rağmen sonraki tenant aynı sırada
+    assert attempted[3:6] == expected  # hatalı tenant aynı konumda yeniden denendi
+
+
+def test_serve_loop_snapshots_tenant_list_for_the_sweep() -> None:
+    """Sweep sırasında listenin sonradan değişmesi o sweep'i etkilemez."""
+    tenants = [UUID(_T1), UUID(_T2)]
+    seen: list[UUID] = []
+
+    def dispatch(tenant_id: UUID) -> None:
+        seen.append(tenant_id)
+        tenants.append(UUID(_T3))  # çalışırken listeyi büyüt
+
+    _serve_loop(
+        tenant_ids=tenants,
+        dispatch=dispatch,
+        stop=_GracefulStop(),
+        interval=0.0,
+        max_cycles=2,
+    )
+
+    assert seen == [UUID(_T1), UUID(_T2), UUID(_T1), UUID(_T2)]
+
+
+# --------------------------------------------------------- poll interval sözleşmesi
+
+
+def test_interval_cli_overrides_environment() -> None:
+    assert resolve_poll_interval(2.5, "7.5") == 2.5
+
+
+def test_interval_falls_back_to_environment() -> None:
+    assert resolve_poll_interval(None, "7.5") == 7.5
+
+
+def test_interval_uses_default_when_cli_and_environment_absent() -> None:
+    assert resolve_poll_interval(None, None) == _DEFAULT_POLL_INTERVAL_SECONDS
+    assert resolve_poll_interval(None, "") == _DEFAULT_POLL_INTERVAL_SECONDS
+    assert resolve_poll_interval(None, "   ") == _DEFAULT_POLL_INTERVAL_SECONDS
+
+
+def test_interval_accepts_minimum_value() -> None:
+    assert resolve_poll_interval(None, "0.1") == 0.1
+    assert resolve_poll_interval(0.1, None) == 0.1
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "-0.5", "0.09", "nan", "inf", "-inf", "abc", "1,5"])
+def test_interval_rejects_invalid_environment_values(raw: str) -> None:
+    with pytest.raises(IntervalError):
+        resolve_poll_interval(None, raw)
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, 0.09, float("nan"), float("inf")])
+def test_interval_rejects_invalid_cli_values(value: float) -> None:
+    with pytest.raises(IntervalError):
+        resolve_poll_interval(value, None)
+
+
+def test_interval_error_message_names_variable_without_leaking_value() -> None:
+    """Mesaj yalnız değişken adı + kategori taşır; geçersiz değeri tekrar etmez."""
+    with pytest.raises(IntervalError) as exc_info:
+        resolve_poll_interval(None, "super-secret-typo-value")
+
+    message = str(exc_info.value)
+    assert "WORKER_POLL_INTERVAL_SECONDS" in message
+    assert "super-secret-typo-value" not in message
+
+
+def test_serve_rejects_invalid_interval_environment(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WORKER_POLL_INTERVAL_SECONDS", "0")
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--serve", "--tenant", _T1])
+
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "WORKER_POLL_INTERVAL_SECONDS" in captured.err
+    assert "WORKER_TENANT_IDS" not in captured.err  # ilgisiz environment içeriği taşımaz
 
 
 def test_serve_loop_isolates_failing_tenant() -> None:
