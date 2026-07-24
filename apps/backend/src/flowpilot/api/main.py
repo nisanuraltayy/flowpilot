@@ -30,10 +30,25 @@ from flowpilot.config.settings import Settings, get_settings
 
 _STRICT_CONFIG_ENVIRONMENTS = ("staging", "production")
 
+# Yalnız gerçek production'da reddedilen local adresler. Staging bazen aynı host
+# üzerinde private bir bağlantı kullanabilir; bu yüzden kontrol production'a özeldir.
+_LOCAL_HOST_MARKERS = ("localhost", "127.0.0.1", "::1")
+
+
+def _has_local_host(value: str) -> bool:
+    """Bağlantı dizesi local bir host'a mı işaret ediyor (değer LOGLANMAZ)."""
+    lowered = value.lower()
+    return any(marker in lowered for marker in _LOCAL_HOST_MARKERS)
+
 
 def _validate_runtime_configuration(settings: Settings) -> None:
+    """Staging/production'da eksik veya güvensiz yapılandırmayı SESSİZCE kabul etme.
+
+    Hata mesajlarında YALNIZ değişken ADI geçer; secret değeri hiçbir zaman yazılmaz.
+    """
     if settings.app_environment not in _STRICT_CONFIG_ENVIRONMENTS:
         return
+
     missing = [
         name
         for name, value in (
@@ -47,6 +62,29 @@ def _validate_runtime_configuration(settings: Settings) -> None:
             f"{settings.app_environment} ortaminda zorunlu yapilandirma eksik: "
             f"{', '.join(missing)}. Uygulama guvenli sekilde baslatilmadi."
         )
+
+    # Debug modu staging/production'da AÇILAMAZ: stack trace ve iç detay sızdırır.
+    if settings.app_debug:
+        raise RuntimeError(
+            f"APP_DEBUG={settings.app_debug} {settings.app_environment} ortaminda kabul "
+            "edilmez. Uygulama guvenli sekilde baslatilmadi."
+        )
+
+    # Production'da local adres = yanlislikla development yapilandirmasiyla acilis.
+    if settings.app_environment == "production":
+        local = [
+            name
+            for name, value in (
+                ("DATABASE_URL", settings.require_database_url()),
+                ("SUPABASE_URL", settings.supabase_url or ""),
+            )
+            if _has_local_host(value)
+        ]
+        if local:
+            raise RuntimeError(
+                f"production ortaminda local adres kullanilamaz: {', '.join(local)}. "
+                "Uygulama guvenli sekilde baslatilmadi."
+            )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
