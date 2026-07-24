@@ -8,7 +8,8 @@
 >
 > Tamamlayıcı belgeler: [deployment-runbook.md](deployment-runbook.md) (ortam envanteri,
 > rollback, incident) ve [worker-operations.md](worker-operations.md) (worker servis modu,
-> heartbeat, healthcheck ve operasyon prosedürleri). Bu belge yalnız **container paketleme
+> heartbeat, healthcheck ve operasyon prosedürleri) ve [http-security.md](http-security.md)
+> (TrustedHost, docs kapatma, API güvenlik header'ları). Bu belge yalnız **container paketleme
 > ve çalıştırma** katmanıdır.
 
 ## 1. Bileşenler ve image'lar
@@ -94,6 +95,7 @@ Her ikisi de `0.0.0.0` dinler ve **non-root** çalışır (API uid `10001`, Web 
 | `DATABASE_URL` | ✅ | Uygulama rolü `flowpilot_app` (BYPASSRLS **yok**) |
 | `SUPABASE_URL` | ✅ | JWKS/issuer bundan türetilir |
 | `APP_DEBUG` | — | staging/production'da `true` **reddedilir** (§6) |
+| `API_TRUSTED_HOSTS` | ✅ | Host allowlist'i; strict ortamda zorunlu, bare `*` yasak (bkz. [http-security.md](http-security.md)) |
 | `APP_PORT`, `LOG_LEVEL`, `FRONTEND_BASE_URL` | — | Davet linki için `FRONTEND_BASE_URL` önerilir |
 
 ### Worker (runtime)

@@ -46,6 +46,7 @@ uygulamayı **başlangıçta açık hata ile durdurur** (sessiz kabul edilmez).
 | `SUPABASE_URL` | Token doğrulama (JWKS/issuer) için Supabase proje URL'i |
 | `SUPABASE_JWT_AUDIENCE` | Beklenen audience claim'i |
 | `SUPABASE_JWT_ALLOWED_ALGORITHMS` | İzinli imza algoritmaları (ör. ES256/RS256) |
+| `API_TRUSTED_HOSTS` | Host allowlist'i — staging/production'da zorunlu ([http-security.md](http-security.md)) |
 
 **Frontend (Next.js):**
 
