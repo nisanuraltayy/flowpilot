@@ -4,7 +4,7 @@ Owner kararı bekleyen konular. Agent bu kararları **kendi başına veremez** (
 
 Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilgili kilit kapatılır, kayıt "Kapanan kararlar" bölümüne taşınır.
 
-**Son güncelleme:** 2026-07-15 — canlı Supabase kabul testiyle **OQ-009 ve OQ-010 kapandı**.
+**Son güncelleme:** 2026-07-24 — FP-OPS-003C güvenlik kararlarıyla **OQ-011…OQ-014 açıldı** (sağlayıcı seçimine bağlı deferred kontroller).
 
 | Kimlik | Konu | Kilit | Etki | Durum |
 |---|---|---|---|---|
@@ -12,6 +12,10 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 | OQ-003 | Repository bootstrap yürütme onayı | — | Yüksek | 🟡 **Prensipte onaylandı — komut bekleniyor** |
 | OQ-004 | Onay eşiklerinin gerçek müşteride doğrulanması | — | Düşük | 🟡 **Geçici varsayım olarak kaydedildi** |
 | OQ-008 | AI provider ve veri politikası | LOCK-007 | Düşük | 🔴 Açık (MVP dışı — aciliyet yok) |
+| OQ-011 | Trusted proxy boundary (forwarded-header allowlist) | — | Orta | 🔴 Açık (sağlayıcı seçimine bağlı) |
+| OQ-012 | Distributed rate-limit store (Redis vs provider-native) | — | Orta | 🔴 Açık (sağlayıcı seçimine bağlı) |
+| OQ-013 | Edge request-body limiti | — | Düşük | 🔴 Açık (sağlayıcı seçimine bağlı) |
+| OQ-014 | HSTS ownership (edge/provider) | — | Düşük | 🔴 Açık (sağlayıcı seçimine bağlı) |
 | OQ-001 | Auth provider | LOCK-004 | — | ✅ **KAPANDI — Supabase Auth** |
 | OQ-005 | PRD MVP listesi ile gerçek MVP kapsamı farkı | — | — | ✅ **KAPANDI** |
 | OQ-006 | E-posta bildirimi | — | — | ✅ **KAPANDI — pilot-ready** |
@@ -33,6 +37,74 @@ Bir OQ kapandığında: karar bir ADR'ye veya kapsam dokümanına yazılır, ilg
 **Aciliyet:** Yok. AI özellikleri hem Local MVP hem pilot-ready kapsamı dışındadır.
 
 **Karar verilene kadar agent ne yapar:** AI ile ilgili **hiçbir kod yazılmaz**. Provider abstraction bile MVP kapsamında değildir.
+
+---
+
+### OQ-011 — Trusted proxy boundary (forwarded-header allowlist)
+
+**Durum:** 🔴 Açık
+**Kaynak:** FP-OPS-003C ([http-security.md §5](operations/http-security.md))
+
+**Soru:** Seçilecek deployment sağlayıcısının güvenilir proxy CIDR/socket sınırı nedir ve Uvicorn forwarded allowlist'i (`--forwarded-allow-ips`) nasıl pinlenecek?
+
+**Neden şu anda açık:** Hosting sağlayıcısında gerçek deployment henüz yapılmadı (ADR-010); sağlayıcının belgelenmiş proxy/egress mimarisi bilinmeden trust sınırı pinlenemez.
+
+**Neyin çözeceği:** İlk gerçek deployment hazırlığında sağlayıcının proxy/load-balancer dokümantasyonunun incelenmesi.
+
+**Uygulama öncesi gereken kanıt:** Sağlayıcının **belgelenmiş** proxy CIDR aralığı veya socket-only erişim garantisi; staging'de `X-Forwarded-For` spoof denemesinin reddedildiğinin doğrulanması.
+
+**Geçici güvenli duruş:** Forwarded header'lar hiçbir güvenlik kararında kullanılmaz; IP tabanlı limit yok; client IP tek başına audit kanıtı değil; `--forwarded-allow-ips=*` yasak. Uygulama zaten `request.client`/forwarded bilgisine dayanmıyor.
+
+---
+
+### OQ-012 — Distributed rate-limit store (Redis vs provider-native)
+
+**Durum:** 🔴 Açık
+**Kaynak:** FP-OPS-003C ([http-security.md §7.1](operations/http-security.md))
+
+**Soru:** Application endpoint-specific limiter için paylaşımlı store Redis mi, provider-native distributed limiter mı olacak?
+
+**Neden şu anda açık:** Yeni dependency operasyon maliyeti, HA ve gözlemlenebilirlik değerlendirmesi gerektirir; sağlayıcı seçilmeden provider-native seçenek bilinemez. Mevcut PostgreSQL'in limiter store olarak kullanılması tercih edilmemektedir (hot-path yükü operasyonel tablolara karışmamalı) — nihai karar bu değerlendirmeyle birlikte verilir.
+
+**Neyin çözeceği:** Sağlayıcı seçimi + ilk pilot trafik profili; edge limiter'ın tek başına yeterliliğinin gözlemlenmesi.
+
+**Uygulama öncesi gereken kanıt:** OQ-011 kapanmış olmalı (public endpoint anahtarı için güvenilir IP); store'un HA/latency/maliyet karşılaştırması; 429 + `Retry-After` sözleşmesinin endpoint testleri.
+
+**Geçici güvenli duruş:** Rate limiter uygulanmaz. Davet token'ları yüksek entropili (CSPRNG), hassas endpoint'ler auth'lu, listeler bounded. In-memory limiter production sözleşmesi olarak kabul edilmez.
+
+---
+
+### OQ-013 — Edge request-body limiti
+
+**Durum:** 🔴 Açık
+**Kaynak:** FP-OPS-003C ([http-security.md §7.2](operations/http-security.md))
+
+**Soru:** Provider üzerinde uygulanacak maksimum request-body boyutu ne olacak; upload özelliği gelirse endpoint bazlı limitler nasıl tanımlanacak?
+
+**Neden şu anda açık:** Limit edge/provider katmanında uygulanacak; sağlayıcı seçilmeden mekanizması ve değeri belirlenemez. Bugün upload endpoint'i yok ve JSON gövdeler Pydantic alan sınırlarıyla kısıtlı.
+
+**Neyin çözeceği:** Sağlayıcı seçimi; deployment checklist'ine maksimum body size kaydının eklenmesi.
+
+**Uygulama öncesi gereken kanıt:** Sağlayıcının body-limit yapılandırma dokümantasyonu; limitin normal istekleri (en büyük meşru JSON gövdesi) kırmadığının staging doğrulaması.
+
+**Geçici güvenli duruş:** Application-level global byte limiti eklenmez (kodda olmayan değer uydurulmaz); upload eklenirse endpoint-specific size/type validation zorunlu kuralı yürürlükte.
+
+---
+
+### OQ-014 — HSTS ownership (edge/provider)
+
+**Durum:** 🔴 Açık
+**Kaynak:** FP-OPS-003C ([http-security.md §7.3](operations/http-security.md))
+
+**Soru:** HSTS'yi edge/provider mı uygulayacak; `includeSubDomains`/`preload` politikası ne olacak?
+
+**Neden şu anda açık:** TLS termination sağlayıcı edge'indedir; uygulama katmanı gerçek şemayı güvenilir bilemez (OQ-011 ile bağlantılı). Yanlış uygulanan HSTS + preload geri alınması zor bir karardır.
+
+**Neyin çözeceği:** Sağlayıcı seçimi ve TLS/domain kurulumu.
+
+**Uygulama öncesi gereken kanıt:** Tüm subdomain'lerin HTTPS'te olduğunun doğrulanması; `includeSubDomains`/`preload` etkilerinin ayrıca değerlendirilmesi.
+
+**Geçici güvenli duruş:** HSTS uygulanmaz (app katmanından da gönderilmez); baseline header setleri ([http-security.md §3, §6](operations/http-security.md)) korunur.
 
 ---
 
