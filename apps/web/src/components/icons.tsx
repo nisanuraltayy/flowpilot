@@ -118,6 +118,15 @@ export function ApprovalRoleIcon({ className }: IconProps) {
   );
 }
 
+export function BlockedTaskIcon({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="m6.5 6.5 11 11" />
+    </svg>
+  );
+}
+
 export function BuildingIcon({ className }: IconProps) {
   return (
     <svg {...base(className)}>
