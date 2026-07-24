@@ -90,13 +90,41 @@ taşımaz. Gerekçe (kanıta dayalı):
 CORS'un yokluğu en güvenli durumdur; permissive CORS eklemek duruşu zayıflatır.
 Bu sözleşme contract testiyle korunur (`test_no_cors_headers_on_any_response`).
 
-## 5. Debug ve proxy sınırı (değişmedi)
+Kesin kurallar:
+
+- Browser yalnız Next.js uygulaması ve Supabase auth yüzeyiyle konuşur.
+- `Access-Control-Allow-Origin: *` **yasaktır**.
+- Credential'lı wildcard CORS **hiçbir zaman** kabul edilmez.
+- Gelecekte browser'ın FastAPI'ye doğrudan erişmesi gerekirse **ayrı story** açılır
+  ve o story şunları içermek zorundadır: explicit origin allowlist, credentials
+  davranışı kararı, preflight (OPTIONS) davranışı ve cache/`Vary: Origin` testleri.
+
+CORS "unutulmuş" değildir; **bilinçli olarak uygulanmamıştır**.
+
+## 5. Debug, proxy ve forwarded-header trust
 
 - `APP_DEBUG=true` staging/production'da reddedilmeye devam eder (FP-OPS-001).
-- Production image reload kullanmaz; Uvicorn CMD bu dilimde **değiştirilmedi**
-  (`--proxy-headers` / `--forwarded-allow-ips` eklenmedi).
-- Uygulama `request.client` veya `X-Forwarded-*` temelli hiçbir güvenlik kararı
-  vermez; davet linki canonical `FRONTEND_BASE_URL`'den üretilir.
+- Production image reload kullanmaz; Uvicorn CMD **değiştirilmedi**
+  (`--proxy-headers` / `--forwarded-allow-ips` eklenmedi — FP-OPS-003C dahil).
+
+**Mevcut durum (kanıtlı):** Uvicorn startup sözleşmesi explicit trusted-proxy
+CIDR **pinlemez**. Uygulama `request.client`, forwarded scheme veya forwarded
+host bilgisini **hiçbir auth/authorization kararında kullanmaz**; canonical davet
+ve frontend URL'leri `FRONTEND_BASE_URL`'den üretilir. Bu nedenle bugünkü
+güvenlik etkisi sınırlıdır; ancak loglanan client IP / scheme bilgisi
+deployment'a göre **güvenilir olmayabilir**.
+
+**Kesin kurallar (sağlayıcı seçilene kadar):**
+
+- `X-Forwarded-For` / `X-Forwarded-Host` / `X-Forwarded-Proto` **hiçbir güvenlik
+  kararında kullanılamaz**.
+- IP tabanlı rate limit **uygulanamaz**.
+- Client IP, audit kanıtı olarak **tek başına kabul edilemez**.
+- Arbitrary `--forwarded-allow-ips=*` **eklenemez**.
+- Trusted proxy aralığı yalnız seçilen sağlayıcının **belgelenmiş** egress/proxy
+  CIDR'ına veya socket sınırına göre pinlenir; bu, production deployment
+  sözleşmesinin parçasıdır ve provider seçildiğinde Docker/start command veya
+  platform config **ayrı değişiklik** olarak ele alınır (bkz. OQ-011).
 
 ## 6. Next.js baseline security header'ları (FP-OPS-003B)
 
@@ -128,12 +156,76 @@ Kurallar ve doğrulanan davranış:
 - İleride popup tabanlı OAuth, embed veya iframe gereksinimi eklenirse
   `Cross-Origin-Opener-Policy` ve `X-Frame-Options` sözleşmesi **yeniden incelenir**.
 
-## 7. Bu dilimlerde bilinçli olarak uygulanmayanlar
+## 7. Deferred controls and deployment-dependent decisions (FP-OPS-003C)
 
-| Konu | Neden / nereye ait |
+Bu bölümdeki kontrollerin **hiçbiri uygulanmamıştır**; her biri *deferred*
+(ertelenmiş) veya *requires provider decision* (sağlayıcı kararı gerektirir)
+durumundadır. Bu görev (FP-OPS-003C) yalnız kararları kayıt altına alır — kod,
+dependency veya runtime davranışı değiştirilmemiştir.
+
+### 7.1 Rate limiting — deferred (tasarım kaydı)
+
+**Neden şimdi uygulanmıyor:**
+
+- Güvenilir client IP henüz yoktur (trusted proxy pinlenmedi — §5).
+- Multi-container ortamda process-local/in-memory limiter **tutarsızdır**;
+  in-memory limiter production sözleşmesi olarak kabul edilmez.
+- Redis veya başka paylaşımlı limiter store mevcut stack'te yoktur; yeni
+  dependency ve operasyon yükü mimari karar gerektirir (bkz. OQ-012).
+- Public davet token'ları yüksek entropili CSPRNG token'larıdır
+  (`secrets.token_urlsafe`); brute force pratik değildir.
+- Diğer hassas endpoint'lerin tamamına yakını auth gerektirir; liste
+  endpoint'leri bounded pagination kullanır.
+
+**Hedef mimari (planned) — iki katman:**
+
+1. **Edge/provider limiter:** hacimsel ve kaba IP tabanlı koruma, sağlayıcı
+   üzerinde uygulanır. Health endpoint'leri muaf tutulur veya ayrı yüksek
+   limite sahip olur.
+2. **Application endpoint-specific limiter:** hassas iş akışları için,
+   paylaşımlı store ile, multi-process/multi-container tutarlı.
+
+**Endpoint öncelikleri (planned):**
+
+| Politika | Endpoint'ler |
 |---|---|
-| HSTS | TLS termination edge'dedir; sağlayıcı seçiminde edge katmanında yönetilir |
-| CSP | Nonce tabanlı dinamik üretim ister → ayrı, doğrulanmış CSP dilimi |
-| Proxy trust (`--forwarded-allow-ips`) | Sağlayıcı seçimine bağlı; o güne dek IP tabanlı karar verilmez |
-| Rate limiting | Katman/store kararı sağlayıcıya bağlı; ayrı tasarım dilimi |
-| HTTPS redirect | Edge'de; uygulama katmanında healthcheck'i kırar |
+| Daha sıkı | Davet preview, davet accept, organization creation, davet create/revoke, approval decision/resolve mutation'ları |
+| Daha genel | Purchase request creation, admin mutation'ları, authenticated read/list |
+| Muaf / ayrı politika | `/health/live`, `/health/ready` (worker heartbeat checker HTTP endpoint değildir) |
+
+**Anahtar stratejisi (planned):** auth'lu endpoint'lerde `tenant_id +
+authenticated user_id` (gerekirse + endpoint/action adı); public endpoint'lerde
+trusted proxy kararı tamamlandıktan sonra client IP, gerekirse token
+fingerprint — **raw token asla loglanmaz ve store key'ine yazılmaz**.
+
+**Response sözleşmesi (planned):** HTTP **429** + `Retry-After` header +
+generic/sanitize edilmiş gövde; secret/token/IP dump yok.
+
+**Store — açık karar (OQ-012):** Redis vs provider-native distributed limiter.
+Mevcut PostgreSQL'in limiter store olarak kullanılması tercih edilmemektedir
+(operasyonel tabloların hot-path yüküyle karışmaması ilkesi); nihai karar
+store değerlendirmesiyle birlikte verilir.
+
+### 7.2 Request body ve timeout sınırları — deferred
+
+**Mevcut durum:** upload endpoint'i yok; JSON modellerinde Pydantic alan
+sınırları var; frontend API timeout'u 10 sn; JWKS timeout'u 5 sn;
+application-level **global request-body byte limiti yok**; DB
+`statement_timeout` / `lock_timeout` application config'inde yok.
+
+**Karar:** request-body byte limiti **edge/provider katmanında** açıkça
+ayarlanır ve provider seçildiğinde maksimum body size deployment checklist'ine
+eklenir (OQ-013). Gelecekte upload özelliği eklenirse endpoint-specific
+size/type validation **zorunludur**. DB `statement_timeout`/`lock_timeout`
+ayrı bir database provisioning/hardening story'sidir. Bu alanların hiçbiri
+FP-OPS-003C'de uygulanmamıştır; kodda olmayan limit değeri bu belgeye yazılmaz.
+
+### 7.3 Diğer ertelenmiş kontroller
+
+| Konu | Durum | Neden / nereye ait |
+|---|---|---|
+| HSTS | Requires provider decision (OQ-014) | TLS termination edge'dedir (§3 ve §6'daki gerekçe) |
+| CSP | Deferred — ayrı frontend dilimi | Nonce tabanlı dinamik üretim ister (§6'daki gerekçe); baseline header'lar mevcut hâliyle korunur |
+| Proxy trust (`--forwarded-allow-ips`) | Requires provider decision (OQ-011) | §5'teki kesin kurallar geçerli |
+| HTTPS redirect | Edge'de | Uygulama katmanında healthcheck'i kırar |
+| Edge WAF | Requires provider decision | Sağlayıcı yeteneklerine bağlı |
